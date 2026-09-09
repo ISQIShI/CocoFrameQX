@@ -1,4 +1,5 @@
 import { _decorator, CCInteger, Collider, Component, game, Animation, Material, MeshRenderer, Node, tween, Vec3, math } from 'cc';
+import { GlobalPool } from '../../Global/GlobalPool';
 const { ccclass, property } = _decorator;
 
 @ccclass('ColletDiTie')
@@ -59,6 +60,8 @@ export class ColletDiTie extends Component {
     private _finishCallBack: (ditie: ColletDiTie) => void = null;
 
     private _callBackExecuteOnce: boolean = true;
+
+    private _initScale: Vec3 = null;
 
     public get isFinished() {
         return this._currentScore === 0;
@@ -177,14 +180,36 @@ export class ColletDiTie extends Component {
         this.setScore(this._maxScore);
     }
 
-    public close(callback?) {
-        let initScale = this.node.scale.clone();
-        let targetScale = initScale.clone().multiplyScalar(1.2);
+    public close(callback?: () => void) {
+        if (this._initScale) {
+            this._initScale.set(this.node.scale);
+        }
+        else {
+            this._initScale = this.node.scale.clone();
+        }
+        const targetScale = GlobalPool.Vec3Pool.alloc();
+        Vec3.multiplyScalar(targetScale, this._initScale, 1.2);
         // this.node.getChildByName("Node").getChildByName("hei").active = false;
         tween(this.node)
             .to(0.3, { scale: targetScale }, { easing: 'quadInOut' })
             .to(0.1, { scale: Vec3.ZERO }, { easing: 'quadInOut' })
             .call(() => {
+                GlobalPool.Vec3Pool.free(targetScale);
+                callback && callback();
+            })
+            .start();
+    }
+
+    public open(callback?: () => void) {
+        const initScale = this._initScale ? this._initScale : Vec3.ONE;
+        const targetScale = GlobalPool.Vec3Pool.alloc();
+        Vec3.multiplyScalar(targetScale, initScale, 1.2);
+        this.node.scale = Vec3.ZERO;
+        tween(this.node)
+            .to(0.1, { scale: targetScale }, { easing: 'quadInOut' })
+            .to(0.3, { scale: initScale }, { easing: 'quadInOut' })
+            .call(() => {
+                GlobalPool.Vec3Pool.free(targetScale);
                 callback && callback();
             })
             .start();

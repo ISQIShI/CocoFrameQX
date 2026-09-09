@@ -2,6 +2,7 @@ import { _decorator, CCBoolean, CCFloat, Component, ITriggerEvent, RigidBody } f
 import { ProductManager } from '../../Global/ProductManager';
 import { Product } from '../../Product/Product';
 import { ColletDiTie } from './ColletDiTie';
+import { Bag } from '../../Actor/Bag';
 const { ccclass, property } = _decorator;
 
 @ccclass('DiTieBase')
@@ -12,7 +13,7 @@ export abstract class DiTieBase extends Component {
     @property({ type: CCFloat, visible: true })
     protected _receiveCoolDown: number = 0.02;
 
-    @property({ type: CCBoolean, visible: true })
+    @property({ visible: true })
     protected _autoHide: boolean = true;
 
     protected _isReady: boolean = true;
@@ -38,23 +39,20 @@ export abstract class DiTieBase extends Component {
 
     protected onTriggerStay(event: ITriggerEvent) {
         if (this._isReady && this._collectCount < this._diTie.maxScore) {
-            const otherCollider = event.otherCollider;
-            // 判断刚体类型
-            const group = otherCollider.getComponent(RigidBody).getGroup();
-            if (group & (1 << 1)) {// 是玩家        
-                const player = otherCollider.node.parent.getComponent(PlayerActor);
-                if (player.coinBag.itemCount <= 0) {
+            const bag = this.getBag(event);
+            if (bag) {
+                if (bag.itemCount <= 0) {
                     return;
                 }
                 this._isReady = false;
                 this._collectCount++;
 
-                const productNode = player.coinBag.popItem(false);
+                const productNode = bag.popItem(false);
                 productNode.setParent(this.node, true);
                 const product = productNode.getComponent(Product);
                 product.throwToPos(() => this.node.worldPosition, 0.3, () => {
                     this._diTie.updateScore(this._diTie.targetScore - 1);
-                    ProductManager.getInstance().returnProduct(product);
+                    this.onProductReceived(product);
                 });
                 this.scheduleOnce(() => {
                     this._isReady = true;
@@ -63,7 +61,9 @@ export abstract class DiTieBase extends Component {
         }
     }
 
-    protected abstract checkTarget(event: ITriggerEvent): boolean;
+    protected abstract getBag(event: ITriggerEvent): Bag;
+
+    protected abstract onProductReceived(product: Product): void;
 
     protected abstract finish(diTie: ColletDiTie): void;
 }
