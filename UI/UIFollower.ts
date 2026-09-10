@@ -1,4 +1,5 @@
 import { _decorator, Camera, CCBoolean, CCFloat, Component, IVec3, Node, screen, Screen, Vec3, } from 'cc';
+import { GlobalPool } from '../Global/GlobalPool';
 const { ccclass, property } = _decorator;
 
 @ccclass('UIFollower')
@@ -79,28 +80,34 @@ export class UIFollower extends Component {
     * 判断是否在相机前方且在屏幕可见范围内（带缓冲边距）
     */
     private checkScreenVisible(worldPos: Vec3): boolean {
-        // 深度与方向检测
-        // 在相机视空间中，Z 轴向前为负值；若 viewPos.z >= -this.camera.near，说明在相机背面
-        Vec3.transformMat4(this._tempVec3, worldPos, this.camera.camera.matView);
-        if (this._tempVec3.z >= -this.camera.near) {
-            return false;
-        }
+        const tempVec3 = GlobalPool.Vec3Pool.alloc();
+        try {
+            // 深度与方向检测
+            // 在相机视空间中，Z 轴向前为负值；若 viewPos.z >= -this.camera.near，说明在相机背面
+            Vec3.transformMat4(tempVec3, worldPos, this.camera.camera.matView);
+            if (tempVec3.z >= -this.camera.near) {
+                return false;
+            }
 
-        if (!this.enableCheckScreenVisible) {
-            return true;
+            if (!this.enableCheckScreenVisible) {
+                return true;
+            }
+            // 将 3D 世界坐标转换为屏幕像素坐标
+            this.camera.worldToScreen(worldPos, tempVec3);
+            // 获取当前屏幕/视口像素尺寸
+            const winSize = screen.resolution;
+            // 判断是否在屏幕矩形范围（加上缓冲区）
+            const result = (
+                tempVec3.x >= -this.screenMargin &&
+                tempVec3.x <= winSize.width + this.screenMargin &&
+                tempVec3.y >= -this.screenMargin &&
+                tempVec3.y <= winSize.height + this.screenMargin
+            );
+            return result;
         }
-        // 将 3D 世界坐标转换为屏幕像素坐标
-        this.camera.worldToScreen(worldPos, this._tempVec3);
-        // 获取当前屏幕/视口像素尺寸
-        const winSize = screen.resolution;
-        // 判断是否在屏幕矩形范围（加上缓冲区）
-        const result = (
-            this._tempVec3.x >= -this.screenMargin &&
-            this._tempVec3.x <= winSize.width + this.screenMargin &&
-            this._tempVec3.y >= -this.screenMargin &&
-            this._tempVec3.y <= winSize.height + this.screenMargin
-        );
-        return result;
+        finally {
+            GlobalPool.Vec3Pool.free(tempVec3);
+        }
     }
 }
 

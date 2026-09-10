@@ -1,31 +1,41 @@
 import { _decorator, Camera, screen, Vec3, view } from 'cc';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
 import { CameraFollow } from './CameraFollow';
-const { ccclass, property, requireComponent, disallowMultiple } = _decorator;
+const { ccclass, property, disallowMultiple, menu } = _decorator;
+
+const enum ScreenMode {
+    Landscape,
+    Portrait,
+}
 
 @ccclass('MainCamera')
 @disallowMultiple(true)
+@menu('Camera/MainCamera')
 export class MainCamera extends ComponentSingletonBase {
+    @property({ type: Camera, displayName: '主摄像机组件', visible: true })
+    private _mainCamera: Camera = null;
 
-    @property({ type: Camera, tooltip: '主摄像机组件' })
-    public mainCamera: Camera = null;
+    @property({ displayName: '横屏时摄像机的欧拉角', group: { id: 'landscape', name: '横屏设置' } })
+    public landscapeEuler = new Vec3(-40, 0, 0);
 
-    public eulerHeng = new Vec3(-40, 0, 0);
-    public eulerShu = new Vec3(-40, 0, 0);
+    @property({ displayName: '横屏时摄像机的偏移量', group: { id: 'landscape', name: '横屏设置' } })
+    public landscapeOffset = new Vec3(0, 10, 12.5);
 
-    @property(Vec3)
-    public hengPos = new Vec3(0, 10, 12.5);
+    @property({ displayName: '竖屏时摄像机的欧拉角', group: { id: 'portrait', name: '竖屏设置' } })
+    public portraitEuler = new Vec3(-40, 0, 0);
 
-    @property(Vec3)
-    public shuPos = new Vec3(0, 10, 12.5);
+    @property({ displayName: '竖屏时摄像机的偏移量', group: { id: 'portrait', name: '竖屏设置' } })
+    public portraitOffset = new Vec3(0, 10, 12.5);
 
-    public offsetPos = new Vec3(0, 0, 0);
-    public initOrthoHeight: number = 0;
-    public targetOrthoHeight: number = 0;
+    public get offsetPos() {
+        return this._screenMode === ScreenMode.Landscape ? this.landscapeOffset : this.portraitOffset;
+    }
+
+    private _screenMode: ScreenMode = ScreenMode.Landscape;
 
     protected onLoad(): void {
-        if (!this.mainCamera) {
-            this.mainCamera = this.node.getComponent(Camera);
+        if (!this._mainCamera) {
+            this._mainCamera = this.node.getComponent(Camera);
         }
     }
 
@@ -38,24 +48,17 @@ export class MainCamera extends ComponentSingletonBase {
     private adaptiveSolution() {
         if (screen.windowSize.height > screen.windowSize.width && screen.windowSize.width / screen.windowSize.height < 1) {
             //竖屏
-            this.node.setRotationFromEuler(this.eulerShu);
-            this.offsetPos = this.shuPos;
-            this.mainCamera.orthoHeight = 3.5;
-            this.initOrthoHeight = 2.5;
-            this.targetOrthoHeight = 4.5;
-
+            this.node.setRotationFromEuler(this.portraitEuler);
+            this._screenMode = ScreenMode.Portrait;
         } else {
             //横屏
-            this.node.setRotationFromEuler(this.eulerHeng);
-            this.offsetPos = this.hengPos;
-            this.mainCamera.orthoHeight = 3.5;
-            this.initOrthoHeight = 2;
-            this.targetOrthoHeight = 3.5;
+            this.node.setRotationFromEuler(this.landscapeEuler);
+            this._screenMode = ScreenMode.Landscape;
         }
 
         let cameraFollow = this.node.getComponent(CameraFollow);
         if (cameraFollow) {
-            cameraFollow.offset = this.offsetPos;
+            cameraFollow.followOffset = this.offsetPos;
         }
     }
 }

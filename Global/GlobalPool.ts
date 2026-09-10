@@ -6,7 +6,7 @@ export class GlobalPool {
 
     public static get Vec3Pool(): Pool<Vec3> {
         if (!this._vec3Pool) {
-            this._vec3Pool = new Pool<Vec3>(() => new Vec3(), 5);
+            this._vec3Pool = new Pool<Vec3>(() => new Vec3(), 10);
         }
         return this._vec3Pool;
     }
