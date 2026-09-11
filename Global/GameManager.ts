@@ -2,23 +2,24 @@ import { _decorator, screen, view, input, ResolutionPolicy } from 'cc';
 import { PlayableSDK } from '../Other/PlayableSDK';
 import { PlayerAction } from '../Other/PrintComponent';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
-
-
 const { ccclass, disallowMultiple } = _decorator;
+
+
+export interface IPausable {
+    pause(value: boolean): void;
+}
+
 
 @ccclass('GameManager')
 @disallowMultiple(true)
 export class GameManager extends ComponentSingletonBase {
 
-    private _isPause: boolean = false;
+    private _isPaused: boolean = false;
 
-    public get isPause(): boolean {
-        return this._isPause;
-    }
+    private _pausableObjectArr: IPausable[] = [];
 
-    public set isPause(value: boolean) {
-        if (this._isPause === value) return;
-        this._isPause = value;
+    public get isPaused(): boolean {
+        return this._isPaused;
     }
 
     protected start() {
@@ -33,9 +34,32 @@ export class GameManager extends ComponentSingletonBase {
         // }
     }
 
-    protected onEnd() {
+    protected gameEnd() {
+        console.log("游戏结束");
         // 游戏正式结束时调用
         PlayableSDK.download(PlayerAction.download);
+    }
+
+    public pauseGame(value: boolean) {
+        if (this._isPaused === value) return;
+        this._isPaused = value;
+
+        for (const obj of this._pausableObjectArr) {
+            obj.pause(value);
+        }
+    }
+
+    public registerPausableObject(obj: IPausable) {
+        this._pausableObjectArr.push(obj);
+    }
+
+    public unregisterPausableObject(obj: IPausable) {
+        const index = this._pausableObjectArr.indexOf(obj);
+        if (index !== -1) {
+            // 使用数组尾部对象替换当前对象，然后删除数组尾部对象
+            this._pausableObjectArr[index] = this._pausableObjectArr[this._pausableObjectArr.length - 1];
+            this._pausableObjectArr.pop();
+        }
     }
 
     public resize(e?) {

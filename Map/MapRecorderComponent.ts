@@ -3,7 +3,7 @@ import { MapRecorder } from './MapRecorder';
 const { ccclass, property } = _decorator;
 
 @ccclass('Component')
-export abstract class MapRecorderComponent<T extends MapRecorder> extends Component {
+export abstract class MapRecorderComponent<T extends MapRecorder = MapRecorder> extends Component {
 
     @property({ type: [MapRecorder], tooltip: '地图记录条目', visible: true })
     protected _mapRecorderEntries: T[] = [];

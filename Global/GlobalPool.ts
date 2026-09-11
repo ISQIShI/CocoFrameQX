@@ -1,4 +1,4 @@
-import { Pool, Vec3 } from "cc";
+import { Pool, Quat, Vec3 } from "cc";
 
 export class GlobalPool {
 
@@ -9,6 +9,15 @@ export class GlobalPool {
             this._vec3Pool = new Pool<Vec3>(() => new Vec3(), 10);
         }
         return this._vec3Pool;
+    }
+
+    private static _quatPool: Pool<Quat>;
+
+    public static get QuatPool(): Pool<Quat> {
+        if (!this._quatPool) {
+            this._quatPool = new Pool<Quat>(() => new Quat(), 5);
+        }
+        return this._quatPool;
     }
 }
 
