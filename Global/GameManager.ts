@@ -1,4 +1,4 @@
-import { _decorator, screen, view, input, ResolutionPolicy } from 'cc';
+import { _decorator, screen, view, input, ResolutionPolicy, Component } from 'cc';
 import { PlayableSDK } from '../Other/PlayableSDK';
 import { PlayerAction } from '../Other/PrintComponent';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
@@ -44,8 +44,17 @@ export class GameManager extends ComponentSingletonBase {
         if (this._isPaused === value) return;
         this._isPaused = value;
 
-        for (const obj of this._pausableObjectArr) {
-            obj.pause(value);
+        let index = 0;
+        while (index < this._pausableObjectArr.length) {
+            const obj = this._pausableObjectArr[index];
+            if (!obj || (obj instanceof Component && !obj.isValid)) {
+                this._pausableObjectArr[index] = this._pausableObjectArr[this._pausableObjectArr.length - 1];
+                this._pausableObjectArr.pop();
+            }
+            else {
+                obj.pause(value);
+                index++;
+            }
         }
     }
 

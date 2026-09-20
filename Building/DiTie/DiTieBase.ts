@@ -1,8 +1,7 @@
-import { _decorator, CCBoolean, CCFloat, Component, ITriggerEvent, RigidBody } from 'cc';
-import { ProductManager } from '../../Global/ProductManager';
+import { _decorator, CCFloat, Component, ITriggerEvent } from 'cc';
+import { Bag } from '../../Actor/Bag';
 import { Product } from '../../Product/Product';
 import { ColletDiTie } from './ColletDiTie';
-import { Bag } from '../../Actor/Bag';
 const { ccclass, property } = _decorator;
 
 @ccclass('DiTieBase')
@@ -40,17 +39,14 @@ export abstract class DiTieBase extends Component {
     protected onTriggerStay(event: ITriggerEvent) {
         if (this._isReady && this._collectCount < this._diTie.maxScore) {
             const bag = this.getBag(event);
-            if (bag) {
-                if (bag.itemCount <= 0) {
-                    return;
-                }
+            if (bag && bag.itemCount > 0) {
                 this._isReady = false;
                 this._collectCount++;
 
-                const productNode = bag.popItem(false);
+                const productNode = bag.popItem();
                 productNode.setParent(this.node, true);
                 const product = productNode.getComponent(Product);
-                product.throwToPos(() => this.node.worldPosition, 0.3, () => {
+                product.throwToPos(this.node.worldPosition, 0.3, () => {
                     this._diTie.updateScore(this._diTie.targetScore - 1);
                     this.onProductReceived(product);
                 });

@@ -1,30 +1,37 @@
-import { _decorator, CCObject, Component, Node } from 'cc';
+import { _decorator, CCObject, CCString, Component, Node } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('NodeWrapper')
-abstract class NodeWrapper extends CCObject {
-    public abstract get node();
-    public abstract apply();
+abstract class NodeWrapper {
+    public abstract get nodeName(): string;
+    public abstract getNode(parentNode: Node): Node;
+    public abstract apply(parentNode: Node);
 }
 
 @ccclass('SingleNodeWrapper')
 class SingleNodeWrapper extends NodeWrapper {
 
-    @property({ type: Node, tooltip: '节点', visible: true })
-    private _node: Node;
+    @property({ type: CCString, visible: false })
+    private _nodeName: string;
 
-    public get node() {
-        return this._node;
+    @property({ type: CCString, tooltip: '节点', visible: true })
+    public get nodeName(): string {
+        return this._nodeName;
     }
 
-    public constructor(node: Node) {
+    public getNode(parentNode: Node): Node {
+        return parentNode.getChildByName(this._nodeName);
+    }
+
+    public constructor(nodeName: string) {
         super();
-        this._node = node;
+        this._nodeName = nodeName;
     }
 
-    public apply() {
-        if (this._node) {
-            this.activeRecursively(this._node);
+    public apply(parentNode: Node) {
+        const node = this.getNode(parentNode);
+        if (node) {
+            this.activeRecursively(node);
         }
     }
 
@@ -39,11 +46,16 @@ class SingleNodeWrapper extends NodeWrapper {
 @ccclass('CompositeNodeWrapper')
 class CompositeNodeWrapper extends NodeWrapper {
 
-    @property({ type: Node, tooltip: '节点', visible: true })
-    private _node: Node;
+    @property({ type: CCString, visible: false })
+    private _nodeName: string;
 
-    public get node() {
-        return this._node;
+    @property({ type: CCString, tooltip: '节点', visible: true })
+    public get nodeName(): string {
+        return this._nodeName;
+    }
+
+    public getNode(parentNode: Node): Node {
+        return parentNode.getChildByName(this._nodeName);
     }
 
     @property({ type: [NodeWrapper], visible: false })
@@ -54,17 +66,20 @@ class CompositeNodeWrapper extends NodeWrapper {
         return this._childNodes;
     }
 
-    public constructor(node: Node) {
+    public constructor(nodeName: string) {
         super();
-        this._node = node;
+        this._nodeName = nodeName;
     }
 
-    public apply() {
-        this._node.active = true;
+    public apply(parentNode: Node) {
+        const node = this.getNode(parentNode);
+        if (node) {
+            node.active = true;
+        }
         let index = 0;
-        for (const child of this._node.children) {
-            if (index < this._childNodes.length && child === this._childNodes[index].node) {
-                this._childNodes[index].apply();
+        for (const child of node.children) {
+            if (index < this._childNodes.length && child === this._childNodes[index].getNode(node)) {
+                this._childNodes[index].apply(node);
                 index++;
             }
             else {
@@ -78,11 +93,11 @@ class CompositeNodeWrapper extends NodeWrapper {
 @ccclass('MapRecorder')
 export class MapRecorder extends CCObject {
 
-    @property({ type: Node, tooltip: '根节点', visible: true })
-    protected _rootNode: Node;
+    @property({ type: [Node], tooltip: '根节点', visible: true })
+    protected _rootNodes: Node[] = [];
 
     @property({ type: [NodeWrapper], visible: false })
-    protected _activatedNode: NodeWrapper[] = [];
+    protected _activatedNode: NodeWrapper[];
 
     @property({ type: [NodeWrapper], tooltip: '激活的节点', visible: true })
     protected get activatedNode(): NodeWrapper[] {
@@ -95,12 +110,14 @@ export class MapRecorder extends CCObject {
     }
     protected set record(value: boolean) {
         if (value) {
-            if (!this._rootNode) {
+            if (this._rootNodes.length === 0) {
                 console.error('根节点未设置，无法进行记录');
                 return;
             }
             this._activatedNode = [];
-            MapRecorder.recordNodes(this._rootNode, this._activatedNode);
+            for (const rootNode of this._rootNodes) {
+                MapRecorder.recordNodes(rootNode, this._activatedNode);
+            }
         }
     }
 
@@ -118,16 +135,16 @@ export class MapRecorder extends CCObject {
         if (!node.active) return;
 
         if (node.children.length === 0) {
-            nodeArr.push(new SingleNodeWrapper(node));
+            nodeArr.push(new SingleNodeWrapper(node.name));
         }
         else {
-            const compositeNode = new CompositeNodeWrapper(node);
+            const compositeNode = new CompositeNodeWrapper(node.name);
             let nodeWrapper: NodeWrapper = compositeNode;
             for (const child of node.children) {
                 this.recordNodes(child, compositeNode.childNodes);
             }
             if (compositeNode.childNodes.length === node.children.length) {
-                // 判断是否所有字节点均为 SingleNodeWrapper
+                // 判断是否所有子节点均为 SingleNodeWrapper
                 let index = 0;
                 for (index = 0; index < compositeNode.childNodes.length; index++) {
                     if (!(compositeNode.childNodes[index] instanceof SingleNodeWrapper)) {
@@ -136,7 +153,7 @@ export class MapRecorder extends CCObject {
                 }
                 if (index === compositeNode.childNodes.length) {
                     // 所有子节点都是 SingleNodeWrapper
-                    nodeWrapper = new SingleNodeWrapper(node);
+                    nodeWrapper = new SingleNodeWrapper(node.name);
                 }
             }
             nodeArr.push(nodeWrapper);
@@ -147,13 +164,15 @@ export class MapRecorder extends CCObject {
      * 应用记录的节点激活状态
      */
     public apply() {
-        if (this._activatedNode.length === 0) {
-            this._rootNode.active = false;
-            return;
-        }
-
-        for (const nodeWrapper of this._activatedNode) {
-            nodeWrapper.apply();
+        let index = 0;
+        for (const rootNode of this._rootNodes) {
+            if (index < this._activatedNode.length && rootNode === this._activatedNode[index].getNode(rootNode.parent)) {
+                this._activatedNode[index].apply(rootNode.parent);
+                index++;
+            }
+            else {
+                rootNode.active = false;
+            }
         }
     }
 }

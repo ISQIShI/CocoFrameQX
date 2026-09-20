@@ -1,8 +1,9 @@
-import { _decorator, Camera, CCBoolean, CCFloat, Component, IVec3, Node, screen, Screen, Vec3, } from 'cc';
+import { _decorator, Camera, CCFloat, Component, IVec3, Node, screen, Vec3 } from 'cc';
 import { GlobalPool } from '../Global/GlobalPool';
-const { ccclass, property } = _decorator;
+const { ccclass, property, executionOrder } = _decorator;
 
 @ccclass('UIFollower')
+@executionOrder(100)
 export class UIFollower extends Component {
 
     @property({ type: Node, tooltip: '跟随目标' })
@@ -37,7 +38,7 @@ export class UIFollower extends Component {
         this.follow(false);
     }
 
-    protected update(deltaTime: number) {
+    protected lateUpdate(deltaTime: number) {
         this.follow(true);
     }
 
@@ -58,6 +59,10 @@ export class UIFollower extends Component {
             return;
         }
 
+        if (this.followTarget instanceof Node) {
+            this.followTarget.updateWorldTransform();
+        }
+
         // 计算带偏移的世界坐标
         Vec3.add(this._tempVec3_1, this.getFollowTargetPos(), this.offset);
 
@@ -66,6 +71,51 @@ export class UIFollower extends Component {
         }
 
         this.camera.convertToUINode(this._tempVec3_1, this.node.parent, this._tempVec3);
+        this.node.setPosition(this._tempVec3);
+
+        if (this.enableScale) {
+            Vec3.transformMat4(this._tempVec3, this.getFollowTargetPos(), this.camera.camera.matView);
+            const ratio = this.gaugedDistance / Math.abs(this._tempVec3.z);
+            this.node.setScale(ratio, ratio, 1);
+        }
+    }
+
+    private follow1(checkScreenVisible: boolean) {
+        if (!this.enableFollow || !this.followTarget || !this.camera) {
+            return;
+        }
+
+        // ================= 【核心修复 1：强制同步矩阵】 =================
+        // 1. 确保 3D 目标节点的世界坐标和矩阵是最新的
+        if (this.followTarget instanceof Node) {
+            this.followTarget.updateWorldTransform();
+        }
+
+        // 2. 确保摄像机节点本身的世界矩阵更新
+        this.camera.node.updateWorldTransform();
+
+        // 3. 【最关键一步】强制底层渲染摄像机更新内部矩阵！
+        // 因为 worldToScreen, convertToUINode 以及 matView 都极度依赖底层的渲染矩阵，必须手动推它一把
+        if (this.camera.camera) {
+            this.camera.camera.update();
+        }
+        // ==============================================================
+
+        // 计算带偏移的世界坐标
+        Vec3.add(this._tempVec3_1, this.getFollowTargetPos(), this.offset);
+
+        if (checkScreenVisible && !this.checkScreenVisible(this._tempVec3_1)) {
+            return;
+        }
+
+        this.camera.convertToUINode(this._tempVec3_1, this.node.parent, this._tempVec3);
+
+        // ================= 【核心修复 2：UI 像素对齐】 =================
+        // 消除转换后产生的浮点数（如 145.39），防止 UI 引擎在亚像素级别产生微观的闪烁抖动
+        this._tempVec3.x = Math.round(this._tempVec3.x);
+        this._tempVec3.y = Math.round(this._tempVec3.y);
+        // ==============================================================
+
         this.node.setPosition(this._tempVec3);
 
         if (this.enableScale) {

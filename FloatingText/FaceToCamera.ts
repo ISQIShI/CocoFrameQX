@@ -21,7 +21,7 @@ export class FaceToCamera extends Component {
     }
 
     protected update(deltaTime: number) {
-        this.node.worldRotation = this._camera.node.worldRotation;
+        this.node.setWorldRotation(this._camera.node.worldRotation);
     }
 }
 

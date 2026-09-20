@@ -35,6 +35,9 @@ export class MoveClip implements IClip {
         if (targetPos) {
             this._targetPos.set(targetPos.x, targetPos.y, targetPos.z);
         }
+        else {
+            this._targetPos.set(targetNode.worldPosition);
+        }
         if (moveSpeed) {
             this._moveSpeed = moveSpeed;
         }
@@ -45,18 +48,38 @@ export class MoveClip implements IClip {
         return this;
     }
 
-    public setX(x: number): MoveClip {
+    public moveToX(x: number): MoveClip {
         this._targetPos.x = x;
         return this;
     }
 
-    public setY(y: number): MoveClip {
+    public moveToY(y: number): MoveClip {
         this._targetPos.y = y;
         return this;
     }
 
-    public setZ(z: number): MoveClip {
+    public moveToZ(z: number): MoveClip {
         this._targetPos.z = z;
+        return this;
+    }
+
+    public moveBy(offset: IVec3): MoveClip {
+        this._targetPos.set(this._targetPos.x + offset.x, this._targetPos.y + offset.y, this._targetPos.z + offset.z);
+        return this;
+    }
+
+    public moveByX(offsetX: number): MoveClip {
+        this._targetPos.x += offsetX;
+        return this;
+    }
+
+    public moveByY(offsetY: number): MoveClip {
+        this._targetPos.y += offsetY;
+        return this;
+    }
+
+    public moveByZ(offsetZ: number): MoveClip {
+        this._targetPos.z += offsetZ;
         return this;
     }
 

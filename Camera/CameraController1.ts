@@ -16,6 +16,7 @@ import {
     Vec2,
     Vec3
 } from 'cc';
+import { InspectorButton } from '../Utils/InspectorButton';
 
 const { ccclass, property, menu } = _decorator;
 
@@ -32,14 +33,10 @@ export type CameraShakePresetType = 'light' | 'medium' | 'heavy' | 'explosion';
 @menu('Camera/CameraController1')
 export class CameraController1 extends Component {
 
-    @property({ displayName: '测试' })
-    private get test(): boolean {
-        return false;
-    }
-    private set test(value: boolean) {
-        if (value) {
-            this.shakePreset("explosion");
-        }
+    @InspectorButton('测试按钮')
+    private test() {
+        console.log(Math.tan(0.5 * Math.PI / 180));
+
     }
 
     // =========================================================================
@@ -294,6 +291,17 @@ export class CameraController1 extends Component {
     // =========================================================================
     // 摄像机缩放 / 拉近拉远 API (Zoom In / Out)
     // =========================================================================
+
+    public zoomToRatio(targetRatio: number, duration: number = 0.5, onComplete?: () => void): void {
+        if (targetRatio < 0) {
+            targetRatio = 0;
+        }
+        this.zoomTo(this.getZoom() * targetRatio, duration, onComplete);
+    }
+
+    public zoomByRatio(ratioDelta: number, duration: number = 0.5, onComplete?: () => void): void {
+        this.zoomToRatio(1 + ratioDelta, duration, onComplete);
+    }
 
     /**
      * 平滑缩放到指定数值

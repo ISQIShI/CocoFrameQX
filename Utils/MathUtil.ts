@@ -96,7 +96,7 @@ export class MathUtil {
      * @param point2 终点
      * @param out 输出点
      */
-    public static bezierCurve(t: number, point1: Vec3, controlPoint: Vec3, point2: Vec3, out: Vec3): void {
+    public static bezierCurve(t: number, point1: IVec3, controlPoint: IVec3, point2: IVec3, out: Vec3): void {
         const u = 1 - t;
         const tt = t * t;
         const uu = u * u;
@@ -109,7 +109,7 @@ export class MathUtil {
     }
 
     /** 获取二阶贝塞尔曲线在 t 处的切线方向，结果写入 out。 */
-    public static bezierTangent(t: number, point1: Vec3, controlPoint: Vec3, point2: Vec3, out: Vec3): void {
+    public static bezierTangent(t: number, point1: IVec3, controlPoint: IVec3, point2: IVec3, out: Vec3): void {
         const oneMinusT = 1 - t;
         out.set(
             2 * (oneMinusT * (controlPoint.x - point1.x) + t * (point2.x - controlPoint.x)),

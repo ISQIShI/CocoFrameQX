@@ -1,73 +1,57 @@
-import { _decorator, CCFloat, Component, Node, Quat, Vec3 } from 'cc';
-import { Stack } from '../DataStructure/Stack';
+import { _decorator, CCFloat, Node, Quat, Vec3 } from 'cc';
+import { ProductContainer } from '../Product/ProductContainer';
+import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 
 const { ccclass, property } = _decorator;
 
 @ccclass('Bag')
-export class Bag extends Component {
+export class Bag extends ProductContainer {
     @property({ type: CCFloat, min: 0 })
-    public spacingDistance: number = 0;
+    public spacingDistance: number = 0.1;
 
-    private _items: Stack<Node> = new Stack<Node>();
+    public capacity: number = -1; // -1表示无限容量
 
-    public get itemCount(): number {
-        return this._items.count;
-    }
+    private _onBagCountChange: MulticastDelegate<(bag: Bag, isAdd: boolean) => void>;
 
-    public calculateItemHeight(index: number): number {
-        return index * this.spacingDistance;
-    }
-
-    public calculateLocalPosition(out: Vec3, index: number) {
-        out.set(0, this.calculateItemHeight(index), 0);
-        return out;
-    }
-
-    private _tempVec3: Vec3 = new Vec3();
-
-    public calculateWorldPosition(out: Vec3, index: number) {
-        this.calculateLocalPosition(this._tempVec3, index);
-        // 计算世界坐标
-        Vec3.transformMat4(out, this._tempVec3, this.node.worldMatrix);
-        return out;
-    }
-
-    public refreshPos(item: Node, index: number) {
-        item.setParent(this.node, true);
-        // 计算物品的位置
-        item.setPosition(0, this.calculateItemHeight(index), 0);
-        // 重置旋转
-        item.setRotation(Quat.IDENTITY);
-    }
-
-    public pushItem(item: Node, refreshPos: boolean = true): number {
-        const index = this._items.count;
-        this._items.push(item);
-        if (refreshPos) {
-            this.refreshPos(item, index);
+    public get onBagCountChange(): MulticastDelegate<(bag: Bag, isAdd: boolean) => void> {
+        if (!this._onBagCountChange) {
+            this._onBagCountChange = new MulticastDelegate<(bag: Bag, isAdd: boolean) => void>();
         }
-        // 返回索引
-        return index;
+        return this._onBagCountChange;
     }
 
-    public popItem(resetPos: boolean = true): Node {
-        if (this._items.isEmpty) {
-            return null;
+    public get isFull(): boolean {
+        if (this.capacity < 0) {
+            return false;
         }
-        const item = this._items.pop();
-        if (resetPos) {
-            item.setParent(null);
+        return this.itemCount + this.comingItemCount >= this.capacity;
+    }
+
+    public popItem(): Node {
+        const item = super.popItem();
+        if (item) {
+            this.onBagCountChange.invoke(this, false);
         }
         return item;
     }
 
-    public peekItem(): Node {
-        if (this._items.isEmpty) {
-            return null;
-        }
-        return this._items.peek();
+    public itemArrive(item: Node, id: number): void {
+        super.itemArrive(item, id);
+        // 重置旋转
+        item.setRotation(Quat.IDENTITY);
+        this.onBagCountChange.invoke(this, true);
     }
 
+    public getItemParent(id: number): Node {
+        return this.node;
+    }
+
+    public calculateLocalPos(out: Vec3, id: number): Vec3 {
+        id = this.idToIndex(id);
+        out.set(0, 0, 0,);
+        out.y += id * this.spacingDistance;
+        return out;
+    }
 }
 
 

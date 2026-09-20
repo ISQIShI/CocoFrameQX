@@ -44,10 +44,10 @@ export abstract class ComponentSingletonBase extends Component {
 
     /**
      * 遇到重复单例冲突时是否销毁整个 Node。
-     * 默认为 false（只销毁重复的 Component，防止误删同节点挂载的其他组件或子节点）
+     * 默认为 true
      */
     @property({ tooltip: '单例冲突时是否销毁整个 Node，false 则仅销毁当前组件' })
-    protected destroyNodeOnConflict: boolean = false;
+    protected destroyNodeOnConflict: boolean = true;
 
     // 存储各个具体派生类的单例实例，按构造函数隔离
     private static readonly _instanceMap: Map<Function, ComponentSingletonBase> = new Map();

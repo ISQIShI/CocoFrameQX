@@ -1,6 +1,7 @@
 import { _decorator, Camera, CCFloat, CharacterController, Component, EventTouch, find, Input, input, Quat, Vec2, Vec3 } from 'cc';
 import { GlobalPool } from '../../Global/GlobalPool';
 import { NodeUtil } from '../../Utils/NodeUtil';
+import { MulticastDelegate } from '../../Delegate/MulticastDelegate';
 
 const { ccclass, property } = _decorator;
 
@@ -20,7 +21,7 @@ export class PlayerController extends Component {
     public maxRadius: number = 0;
 
     @property({ type: CCFloat, min: 0 })
-    public moveSpeed: number = 2;
+    public moveSpeed: number = 5;
 
     // 触摸输入状态
     private _isTouchMoving: boolean = false;
@@ -31,6 +32,24 @@ export class PlayerController extends Component {
     private _inputVector: Vec2 = new Vec2();
 
     private _moveDir: Vec3 = new Vec3();
+
+    private _onMoveStart: MulticastDelegate<() => void>;
+
+    public get onMoveStart(): MulticastDelegate<() => void> {
+        if (!this._onMoveStart) {
+            this._onMoveStart = new MulticastDelegate<() => void>();
+        }
+        return this._onMoveStart;
+    }
+
+    private _onMoveEnd: MulticastDelegate<() => void>;
+
+    public get onMoveEnd(): MulticastDelegate<() => void> {
+        if (!this._onMoveEnd) {
+            this._onMoveEnd = new MulticastDelegate<() => void>();
+        }
+        return this._onMoveEnd;
+    }
 
     /**
      * 当前是否处于有效触摸移动状态
@@ -55,7 +74,7 @@ export class PlayerController extends Component {
         input.on(Input.EventType.TOUCH_END, this.onTouchEnd, this);
         input.on(Input.EventType.TOUCH_CANCEL, this.onTouchCancel, this);
 
-        this.node.setRotation(Quat.IDENTITY);
+        // this.node.setRotation(Quat.IDENTITY);
     }
 
     protected onDisable(): void {
@@ -100,6 +119,7 @@ export class PlayerController extends Component {
 
         // 超过死区距离才判定为移动
         if (dist > this.deadZone) {
+            this._onMoveStart?.invoke();
             this._isTouchMoving = true;
             // 计算输入力度比例 (0 ~ 1) 并归一化方向
             const strength = this.maxRadius > 0 ? Math.min(1.0, dist / this.maxRadius) : 1;
@@ -125,6 +145,7 @@ export class PlayerController extends Component {
     }
 
     private resetTouchState(): void {
+        this.onMoveEnd?.invoke();
         this._isTouchMoving = false;
         this._inputVector.set(0, 0);
         this._moveDir.set(0, 0, 0);

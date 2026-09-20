@@ -1,4 +1,4 @@
-import { _decorator, Component, tween, Vec3 } from 'cc';
+import { _decorator, Component, IVec3, tween, Vec3 } from 'cc';
 import { MathUtil } from '../Utils/MathUtil';
 const { ccclass, property } = _decorator;
 
@@ -12,24 +12,39 @@ export class Product extends Component {
     }
 
     // 投掷到指定位置(世界坐标)
-    throwToPos(targetPosFunc: () => Vec3, delay: number, callback?) {
+    throwToPos(targetPos: IVec3 | (() => IVec3), delay: number, callback?) {
         this._isMoving = true;
+
         const startPos = this.node.worldPosition.clone();
         const controlPos = new Vec3();
-        Vec3.add(controlPos, startPos, targetPosFunc());
-        controlPos.multiplyScalar(0.5);
-        controlPos.add3f(0, 2, 0); // 控制点在起点和终点的中间，并向上偏移
-        let tempPos = new Vec3();
-        let t = tween(this.node)
-            .update(delay, (target, ratio) => {
-                MathUtil.bezierCurve(ratio, startPos, controlPos, targetPosFunc(), tempPos);
+        const tempPos = new Vec3();
+
+        const t = tween(this.node);
+
+        if (typeof targetPos === 'function') {
+            t.update(delay, (target, ratio) => {
+                const tempTargetPos = targetPos();
+                controlPos.x = (startPos.x + tempTargetPos.x) * 0.5;
+                controlPos.y = (startPos.y + tempTargetPos.y) * 0.5 + 2;
+                controlPos.z = (startPos.z + tempTargetPos.z) * 0.5;
+                MathUtil.bezierCurve(ratio, startPos, controlPos, tempTargetPos, tempPos);
                 target.setWorldPosition(tempPos);
-            })
-            .call(() => {
-                if (callback) callback();
-                this._isMoving = false;
-            })
-            .start();
+            });
+        }
+        else {
+            t.update(delay, (target, ratio) => {
+                controlPos.x = (startPos.x + targetPos.x) * 0.5;
+                controlPos.y = (startPos.y + targetPos.y) * 0.5 + 2;
+                controlPos.z = (startPos.z + targetPos.z) * 0.5;
+                MathUtil.bezierCurve(ratio, startPos, controlPos, targetPos, tempPos);
+                target.setWorldPosition(tempPos);
+            });
+        }
+
+        t.call(() => {
+            if (callback) callback();
+            this._isMoving = false;
+        }).start();
     }
 }
 

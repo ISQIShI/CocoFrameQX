@@ -80,21 +80,21 @@ export class Label3D extends Component {
      * 显示文字
      */
     @property
-    private _string: string = "";
+    private _text: string = "";
     @property({ displayOrder: 3, multiline: true, displayName: "文字" })
-    get string() {
-        return this._string;
+    get text() {
+        return this._text;
     }
-    set string(val) {
+    set text(val) {
         if (val === null || val === undefined) {
             val = '';
         } else {
             val = val.toString();
         }
-        if (this._string === val) {
+        if (this._text === val) {
             return;
         }
-        this._string = val;
+        this._text = val;
         this.updateRenderData();
     }
     private _fontSize: number = 80;
@@ -259,7 +259,7 @@ export class Label3D extends Component {
     }
     private updateProperties(): void {
         //设置canvas 的宽和高
-        this._splitStrings = this._string.split("\\n");
+        this._splitStrings = this._text.split("\\n");
         for (let i = 0; i < this._splitStrings.length; i++) {
             //获取文本的宽度
             let len: number = this._context.measureText(this._splitStrings[i]).width + Math.max(this.strokeWidth, this.shadowSize) * 2;
