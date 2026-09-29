@@ -61,7 +61,7 @@ export class ColletDiTie extends Component {
 
     private _callBackExecuteOnce: boolean = true;
 
-    private _initScale: Vec3 = null;
+    private _initScale: Vec3 = new Vec3();
 
     public get isFinished() {
         return this._currentScore === 0;
@@ -75,6 +75,10 @@ export class ColletDiTie extends Component {
     public set finishCallBackOnce(value: (ditie: ColletDiTie) => void) {
         this._finishCallBack = value;
         this._callBackExecuteOnce = true;
+    }
+
+    protected onLoad(): void {
+        this._initScale.set(this.node.scale);
     }
 
     protected start(): void {
@@ -181,14 +185,9 @@ export class ColletDiTie extends Component {
     }
 
     public close(callback?: () => void) {
-        if (this._initScale) {
-            this._initScale.set(this.node.scale);
-        }
-        else {
-            this._initScale = this.node.scale.clone();
-        }
         const targetScale = GlobalPool.Vec3Pool.alloc();
-        Vec3.multiplyScalar(targetScale, this._initScale, 1.2);
+        targetScale.set(this.node.scale);
+        Vec3.multiplyScalar(targetScale, targetScale, 1.2);
         // this.node.getChildByName("Node").getChildByName("hei").active = false;
         tween(this.node)
             .to(0.3, { scale: targetScale }, { easing: 'quadInOut' })
@@ -201,7 +200,7 @@ export class ColletDiTie extends Component {
     }
 
     public open(callback?: () => void) {
-        const initScale = this._initScale ? this._initScale : Vec3.ONE;
+        const initScale = this._initScale;
         const targetScale = GlobalPool.Vec3Pool.alloc();
         Vec3.multiplyScalar(targetScale, initScale, 1.2);
         this.node.scale = Vec3.ZERO;

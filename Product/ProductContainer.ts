@@ -1,12 +1,56 @@
-import { _decorator, Component, Node, Vec3 } from 'cc';
+import { _decorator, CCInteger, Component, director, Node, Pool, Tween, Vec3 } from 'cc';
 import { LinkedList } from '../DataStructure/LinkedList';
 import { Stack } from '../DataStructure/Stack';
 const { ccclass, property } = _decorator;
 
+export type TransferProcess = Tween;
+
+export class TransferItem {
+
+    private readonly _to: ProductContainer;
+
+    public get to(): ProductContainer {
+        return this._to;
+    }
+
+    private readonly _item: Node;
+
+    public get item(): Node {
+        return this._item;
+    }
+
+    private readonly _itemId: number;
+
+    public get itemId(): number {
+        return this._itemId;
+    }
+
+    private readonly _targetPos: Vec3;
+
+    public get targetPos(): Vec3 {
+        return this._targetPos;
+    }
+
+    public constructor(to: ProductContainer, item: Node, itemId: number) {
+        this._to = to;
+        this._item = item;
+        this._itemId = itemId;
+        this._targetPos = new Vec3();
+    }
+
+    public calculateWorldPos(): Vec3 {
+        return this._to.calculateWorldPos(this);
+    }
+
+    public itemArrive(): void {
+        this._to.itemArrive(this);
+    }
+}
+
 @ccclass('ProductContainer')
 export abstract class ProductContainer extends Component {
 
-    protected _comingItems: LinkedList<Node> = new LinkedList<Node>();
+    protected _comingItems: LinkedList<TransferItem> = new LinkedList<TransferItem>();
 
     protected _items: Stack<Node> = new Stack<Node>();
 
@@ -14,18 +58,26 @@ export abstract class ProductContainer extends Component {
 
     protected _lastId: number = 0;
 
+    @property({ type: CCInteger })
     public get itemCount(): number {
         return this._items.count;
     }
 
+    @property({ type: CCInteger })
     public get comingItemCount(): number {
         return this._comingItems.count;
     }
 
-    public pushItem(item: Node): number {
+    public get totalItemCount(): number {
+        return this._items.count + this._comingItems.count;
+    }
+
+    public pushItem(item: Node): TransferItem {
         const id = ++this._globalId;
-        this._comingItems.addLast(item);
-        return id;
+        const transferItem = new TransferItem(this, item, id);
+        this.calculateWorldPos(transferItem);
+        this._comingItems.addLast(transferItem);
+        return transferItem;
     }
 
     public popItem(): Node {
@@ -42,17 +94,17 @@ export abstract class ProductContainer extends Component {
         return this._items.peek();
     }
 
-    public itemArrive(item: Node, id: number): void {
-        this._lastId = id;
-        this._comingItems.remove(item);
-        this._items.push(item);
+    public itemArrive(transferItem: TransferItem): void {
+        this._lastId = transferItem.itemId;
+        this._comingItems.remove(transferItem);
+        this._items.push(transferItem.item);
 
         // 设置父节点
-        item.setParent(this.getItemParent(id), true);
+        transferItem.item.setParent(this.getItemParent(transferItem.itemId), true);
 
         // 设置位置
-        this.calculateLocalPos(this._tempVec3, id);
-        item.setPosition(this._tempVec3);
+        this.calculateLocalPos(transferItem);
+        transferItem.item.setPosition(transferItem.targetPos);
     }
 
     protected _tempVec3: Vec3 = new Vec3();
@@ -63,14 +115,39 @@ export abstract class ProductContainer extends Component {
 
     public abstract getItemParent(id: number): Node;
 
-    public abstract calculateLocalPos(out: Vec3, id: number): Vec3;
+    public abstract calculateLocalPos(transferItem: TransferItem): Vec3;
 
-    public calculateWorldPos(out: Vec3, id: number): Vec3 {
-        this.calculateLocalPos(this._tempVec3, id);
-        Vec3.transformMat4(out, this._tempVec3, this.getItemParent(id).worldMatrix);
-        return out;
+    public calculateWorldPos(transferItem: TransferItem): Vec3 {
+        this._tempVec3.set(this.calculateLocalPos(transferItem));
+        Vec3.transformMat4(transferItem.targetPos, this._tempVec3, this.getItemParent(transferItem.itemId).worldMatrix);
+        return transferItem.targetPos;
+    }
+
+    public transferTo(to: ProductContainer, transferProcess?: (transferItem: TransferItem) => TransferProcess, autoArrive: boolean = true) {
+        ProductContainer.transferItem(this, to, transferProcess, autoArrive);
+    }
+
+    public static transferItem(from: ProductContainer, to: ProductContainer, transferProcess?: (transferItem: TransferItem) => TransferProcess, autoArrive: boolean = true) {
+        // 默认所有条件均满足，可以传递
+        const item = from.popItem();
+        const transferItem = to.pushItem(item);
+
+        const process = transferProcess ? transferProcess(transferItem) : null;
+
+        if (process) {
+            if (process instanceof Tween) {
+                if (autoArrive) {
+                    process.call(() => {
+                        to.itemArrive(transferItem);
+                    });
+                }
+                process.start();
+            }
+        }
+        else {
+            if (autoArrive) {
+                to.itemArrive(transferItem);
+            }
+        }
     }
 }
-
-
-

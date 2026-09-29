@@ -46,10 +46,11 @@ export abstract class DiTieBase extends Component {
                 const productNode = bag.popItem();
                 productNode.setParent(this.node, true);
                 const product = productNode.getComponent(Product);
-                product.throwToPos(this.node.worldPosition, 0.3, () => {
-                    this._diTie.updateScore(this._diTie.targetScore - 1);
-                    this.onProductReceived(product);
-                });
+                product.throwToPos(this.node.worldPosition, 0.3)
+                    .call(() => {
+                        this._diTie.updateScore(this._diTie.targetScore - 1);
+                        this.onProductReceived(product);
+                    }).start();
                 this.scheduleOnce(() => {
                     this._isReady = true;
                 }, this._receiveCoolDown);

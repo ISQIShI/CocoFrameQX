@@ -246,6 +246,11 @@ export class Label3D extends Component {
         this._texture.image = image;
 
     }
+
+    public refresh() {
+        this.updateRenderData();
+    }
+
     /**
      * 刷新渲染
      */

@@ -34,6 +34,13 @@ export class Stack<T> {
             callback(this._elements[i], i);
         }
     }
+
+    public getElement(index: number): T {
+        if (index < 0 || index >= this._elements.length) {
+            return null;
+        }
+        return this._elements[index];
+    }
 }
 
 

@@ -80,6 +80,22 @@ export class NodeUtil {
         Quat.fromAxisAngle(this._tempQuat, Vec3.UNIT_Y, rad);
         targetNode.setWorldRotation(this._tempQuat);
     }
+
+    public static dirToQuat(out: Quat, direction: IVec3): Quat {
+        const dx = direction.x;
+        const dz = direction.z;
+        // 原地/零向量保护
+        if (dx === 0 && dz === 0) {
+            return;
+        }
+        // 模型朝向为 +Z 轴：
+        // dx=0, dz=1 (正前) -> atan2(0, 1) = 0 rad
+        // dx=1, dz=0 (正右) -> atan2(1, 0) = PI/2 (顺时针转90度)
+        const rad = Math.atan2(dx, dz);
+        // 绕 Y 轴生成四元数
+        Quat.fromAxisAngle(out, Vec3.UNIT_Y, rad);
+        return out;
+    }
 }
 
 

@@ -1,5 +1,6 @@
 import { _decorator, Camera, CCFloat, Component, Node, Vec3 } from 'cc';
 import { GlobalPool } from '../Global/GlobalPool';
+import { InspectorButton } from '../Utils/InspectorButton';
 const { ccclass, property, disallowMultiple } = _decorator;
 
 @ccclass('CameraFollow')
@@ -52,6 +53,14 @@ export class CameraFollow extends Component {
                 cam.camera.update();
             }
         }
+    }
+
+    @InspectorButton('立即跟随 - 编辑器')
+    private editorFollow() {
+        const temp = this.smoothFollow;
+        this.smoothFollow = false;
+        this.updateFollow(1 / 60);
+        this.smoothFollow = temp;
     }
 
     /**
