@@ -10,7 +10,7 @@ export abstract class DiTieBase extends Component {
     protected _diTie: ColletDiTie;
 
     @property({ type: CCFloat, visible: true })
-    protected _receiveCoolDown: number = 0.02;
+    protected _receiveCoolDown: number = 0.01;
 
     @property({ visible: true })
     protected _autoHide: boolean = true;

@@ -22,11 +22,11 @@ export class Bag extends ProductContainer {
 
     public capacity: number = -1; // -1表示无限容量
 
-    private _onBagCountChange: MulticastDelegate<(bag: Bag, isAdd: boolean) => void>;
+    private _onBagCountChange: MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void>;
 
-    public get onBagCountChange(): MulticastDelegate<(bag: Bag, isAdd: boolean) => void> {
+    public get onBagCountChange(): MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void> {
         if (!this._onBagCountChange) {
-            this._onBagCountChange = new MulticastDelegate<(bag: Bag, isAdd: boolean) => void>();
+            this._onBagCountChange = new MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void>();
         }
         return this._onBagCountChange;
     }
@@ -71,7 +71,7 @@ export class Bag extends ProductContainer {
     public popItem(): Node {
         const item = super.popItem();
         if (item) {
-            this.onBagCountChange.invoke(this, false);
+            this.onBagCountChange.invoke(this, false, item);
         }
         return item;
     }
@@ -81,7 +81,7 @@ export class Bag extends ProductContainer {
 
         // 重置旋转
         transferItem.item.setRotation(Quat.IDENTITY);
-        this.onBagCountChange.invoke(this, true);
+        this.onBagCountChange.invoke(this, true, transferItem.item);
     }
 
     public getItemParent(id: number): Node {

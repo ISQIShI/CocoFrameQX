@@ -1,13 +1,21 @@
 import { _decorator, CCFloat, Component, EventTouch, input, Input, Node, UIOpacity } from 'cc';
+import { GameManager, IPausable } from '../Global/GameManager';
 const { ccclass, property } = _decorator;
 
 @ccclass('DragTip')
-export class DragTip extends Component {
-
+export class DragTip extends Component implements IPausable {
     @property({ type: CCFloat, min: 0, tooltip: '拖拽提示的超时时间（秒），超过该时间未触发拖拽则显示提示' })
-    public timeoutPeriod: number = 2;
+    public timeoutPeriod: number = 3;
 
     private _timer: number = -1;
+
+    protected start(): void {
+        GameManager.getInstance().registerPausableObject(this);
+    }
+
+    public pause(value: boolean): void {
+        this.node.active = !value;
+    }
 
     protected onEnable(): void {
         input.on(Input.EventType.TOUCH_START, this.onTouchStart, this);

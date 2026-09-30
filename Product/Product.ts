@@ -24,10 +24,10 @@ export class Product extends Component {
     }
 
     // 投掷到指定位置(世界坐标)
-    public throwToPos(targetPos: IVec3 | (() => IVec3), delay: number) {
+    public throwToPos(targetPos: IVec3 | (() => IVec3), delay: number, controlPointHeight: number = 2) {
         this._isMoving = true;
 
-        const t = TweenUtil.throwToPos(this.node, targetPos, delay);
+        const t = TweenUtil.throwToPos(this.node, targetPos, delay, controlPointHeight);
 
         t.call(() => {
             this._isMoving = false;

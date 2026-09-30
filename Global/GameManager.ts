@@ -1,9 +1,11 @@
-import { _decorator, screen, view, input, ResolutionPolicy, Component } from 'cc';
+import { _decorator, screen, view, input, ResolutionPolicy, Component, AudioSource, director } from 'cc';
 import { PlayableSDK } from '../Other/PlayableSDK';
 import { PlayerAction } from '../Other/PrintComponent';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
+import { AudioManager } from '../Other/AudioManager';
 const { ccclass, disallowMultiple } = _decorator;
 
+declare var window;
 
 export interface IPausable {
     pause(value: boolean): void;
@@ -22,16 +24,44 @@ export class GameManager extends ComponentSingletonBase {
         return this._isPaused;
     }
 
+    private _audioSource: AudioSource = null!;
+
+    protected onLoad(): void {
+        this._audioSource = this.getComponent(AudioSource)!;
+        // assert(audioSource);
+        // director.addPersistRootNode(this.node);
+
+        PlayableSDK.adapter();
+        PlayableSDK.gameReady();
+
+        // init AudioManager
+        AudioManager.init(this._audioSource, this.node);
+
+        let enableAudio = () => {
+            console.log('AudioManager.resume');
+            AudioManager.firstClick = true;
+            AudioManager.resume();
+
+            document.removeEventListener('mouseup', enableAudio, true);
+            document.removeEventListener('touchend', enableAudio, true);
+        }
+
+        document.addEventListener('mouseup', enableAudio, true);
+        document.addEventListener('touchend', enableAudio, true);
+    }
+
     protected start() {
         // 系统监听屏幕变化
+        AudioManager.musicPlay("bgm", true);
+
         view.on("canvas-resize", this.resize, this);
         this.scheduleOnce(this.resize);
 
         PlayableSDK.onInteracted();
 
-        // if (window.setLoadingProgress) {
-        //     window.setLoadingProgress(100);
-        // }
+        if (window.setLoadingProgress) {
+            window.setLoadingProgress(100);
+        }
     }
 
     protected gameEnd() {

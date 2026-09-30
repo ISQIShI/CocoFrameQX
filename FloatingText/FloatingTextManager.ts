@@ -11,7 +11,7 @@ export class FloatingTextManager extends ComponentSingletonBase {
 
     private _queue: Queue<Node> = new Queue<Node>();
 
-    public getFloatingText(autoActive: boolean = true): Label3D {
+    public getFloatingText(autoActive: boolean = true): Node {
         let node: Node;
         if (this._queue.isEmpty) {
             node = instantiate(this._prefab);
@@ -22,12 +22,10 @@ export class FloatingTextManager extends ComponentSingletonBase {
             node = this._queue.dequeue();
         }
         node.active = autoActive;
-        const label = node.getComponent(Label3D);
-        return label;
+        return node;
     }
 
-    public returnFloatingText(label: Label3D) {
-        const node = label.node;
+    public returnFloatingText(node: Node) {
         if (this._queue.count > 10) {
             node.destroy();
         }

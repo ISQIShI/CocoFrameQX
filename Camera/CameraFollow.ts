@@ -56,7 +56,7 @@ export class CameraFollow extends Component {
     }
 
     @InspectorButton('立即跟随 - 编辑器')
-    private editorFollow() {
+    public followNow() {
         const temp = this.smoothFollow;
         this.smoothFollow = false;
         this.updateFollow(1 / 60);

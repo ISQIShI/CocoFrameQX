@@ -160,6 +160,7 @@ export class ColletDiTie extends Component {
         if (miaobian_g) {
             miaobian_g.active = value;
         }
+        return;
         const miaobian_b = this.node.getChildByPath("Node/miaobian_b");
         if (miaobian_b) {
             miaobian_b.active = !value;

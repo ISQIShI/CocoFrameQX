@@ -1,4 +1,4 @@
-import { _decorator, Collider, Component, Node, RigidBody } from 'cc';
+import { _decorator, Collider, Component, Node } from 'cc';
 const { ccclass, property } = _decorator;
 
 @ccclass('DiTie')
@@ -7,11 +7,21 @@ export class DiTie extends Component {
     @property(Collider)
     public collider: Collider;
 
+    @property({ type: Node, visible: true })
+    private _highlight: Node;
+
+    protected start(): void {
+        if (!this._highlight) {
+            this._highlight = this.node.getChildByName('highlight');
+        }
+    }
+
     public updateColor(value: boolean) {
+        if (!this._highlight) return;
         if (value) {
-            this.node.getChildByName("zhan_g").active = true;
+            this._highlight.active = true;
         } else {
-            this.node.getChildByName("zhan_g").active = false;
+            this._highlight.active = false;
         }
     }
 }
