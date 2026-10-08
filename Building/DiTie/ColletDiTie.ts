@@ -1,4 +1,4 @@
-import { _decorator, CCInteger, Collider, Component, game, Animation, Material, MeshRenderer, Node, tween, Vec3, math } from 'cc';
+import { _decorator, CCInteger, Collider, Component, game, Animation, Material, MeshRenderer, Node, tween, Vec3, math, Color } from 'cc';
 import { GlobalPool } from '../../Global/GlobalPool';
 const { ccclass, property } = _decorator;
 
@@ -156,11 +156,18 @@ export class ColletDiTie extends Component {
     }
 
     public updateColor(value: boolean) {
-        const miaobian_g = this.node.getChildByPath("Node/miaobian_g");
-        if (miaobian_g) {
-            miaobian_g.active = value;
+        const frame = this.node.getChildByPath("Node/Frame");
+        if (frame) {
+            const material = frame.getComponent(MeshRenderer).material;
+            if (value) {
+                material.setProperty('albedo', new Color(0, 255, 0, 255));
+            }
+            else {
+                material.setProperty('albedo', new Color(255, 255, 255, 255));
+            }
         }
         return;
+
         const miaobian_b = this.node.getChildByPath("Node/miaobian_b");
         if (miaobian_b) {
             miaobian_b.active = !value;

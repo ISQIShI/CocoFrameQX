@@ -29,7 +29,7 @@ export class CameraFollow extends Component {
         tooltip: '摄像机离目标的距离',
         visible: function (this: CameraFollow) { return this.autoFocus; }
     })
-    public focusDistance: number = 10;
+    public focusDistance: number = 30;
 
     @property({ tooltip: '是否启用平滑插值跟随' })
     public smoothFollow: boolean = true;

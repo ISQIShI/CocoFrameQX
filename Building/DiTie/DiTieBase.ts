@@ -1,7 +1,8 @@
-import { _decorator, CCFloat, Component, ITriggerEvent } from 'cc';
+import { _decorator, CCFloat, Component, ITriggerEvent, randomRange, Vec3 } from 'cc';
 import { Bag } from '../../Actor/Bag';
 import { Product } from '../../Product/Product';
 import { ColletDiTie } from './ColletDiTie';
+import { Utils } from '../../Product/Utils';
 const { ccclass, property } = _decorator;
 
 @ccclass('DiTieBase')
@@ -46,7 +47,8 @@ export abstract class DiTieBase extends Component {
                 const productNode = bag.popItem();
                 productNode.setParent(this.node, true);
                 const product = productNode.getComponent(Product);
-                product.throwToPos(this.node.worldPosition, 0.3)
+                Utils.setRotationSlerpByAngle(productNode, new Vec3(0, randomRange(-180, 180), 0), 0.25 / 2);
+                product.throwToPos(this.node.worldPosition, 0.25)
                     .call(() => {
                         this._diTie.updateScore(this._diTie.targetScore - 1);
                         this.onProductReceived(product);
