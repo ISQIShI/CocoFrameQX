@@ -260,9 +260,6 @@ export class Utils {
         return Math.round(max)
     }
 
-
-
-
     public static createRenderTexture(resolutionScale: number, numOfColors: number = 1): RenderTexture {
         let texture = new RenderTexture();
         let size = screen.windowSize;
@@ -390,21 +387,6 @@ export class Utils {
     //         })
     //         .start();
     // }
-    /**
-     * @zh 通过角度平滑旋转
-     * @param node 节点
-     * @param angle 目标角度
-     * @param during 旋转速度
-     */
-    public static setRotationSlerpByAngle(node: Node, angle: Vec3, during: number = 0.5, callBack?) {
-        const targetRotation = new Quat();
-        Quat.fromEuler(targetRotation, angle.x, angle.y, angle.z);
-        tween(node)
-            .to(during, { rotation: targetRotation }, { easing: 'quadOut' })
-            .call(() => {
-                callBack && callBack();
-            })
-            .start();
-    }
+
 
 }

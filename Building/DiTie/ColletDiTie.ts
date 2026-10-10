@@ -194,8 +194,7 @@ export class ColletDiTie extends Component {
 
     public close(callback?: () => void) {
         const targetScale = GlobalPool.Vec3Pool.alloc();
-        targetScale.set(this.node.scale);
-        Vec3.multiplyScalar(targetScale, targetScale, 1.2);
+        Vec3.multiplyScalar(targetScale, this.node.scale, 1.3);
         // this.node.getChildByName("Node").getChildByName("hei").active = false;
         tween(this.node)
             .to(0.3, { scale: targetScale }, { easing: 'quadInOut' })
@@ -210,11 +209,11 @@ export class ColletDiTie extends Component {
     public open(callback?: () => void) {
         const initScale = this._initScale;
         const targetScale = GlobalPool.Vec3Pool.alloc();
-        Vec3.multiplyScalar(targetScale, initScale, 1.2);
-        this.node.scale = Vec3.ZERO;
+        Vec3.multiplyScalar(targetScale, initScale, 1.3);
+        this.node.setScale(Vec3.ZERO);
         tween(this.node)
-            .to(0.1, { scale: targetScale }, { easing: 'quadInOut' })
-            .to(0.3, { scale: initScale }, { easing: 'quadInOut' })
+            .to(0.3, { scale: targetScale }, { easing: 'quadInOut' })
+            .to(0.15, { scale: initScale }, { easing: 'quadInOut' })
             .call(() => {
                 GlobalPool.Vec3Pool.free(targetScale);
                 callback && callback();

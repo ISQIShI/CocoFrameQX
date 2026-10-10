@@ -1,6 +1,7 @@
 import { _decorator, CCFloat, math, Node, Quat, Vec3 } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { ProductContainer, TransferItem } from '../Product/ProductContainer';
+import { TweenUtil } from '../Utils/TweenUtil';
 
 const { ccclass, property } = _decorator;
 
@@ -82,6 +83,8 @@ export class Bag extends ProductContainer {
         // 重置旋转
         transferItem.item.setRotation(Quat.IDENTITY);
         this.onBagCountChange.invoke(this, true, transferItem.item);
+
+        TweenUtil.jelly(transferItem.item, 0.9).start();
     }
 
     public getItemParent(id: number): Node {
