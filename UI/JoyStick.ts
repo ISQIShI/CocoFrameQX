@@ -17,8 +17,10 @@ export class JoyStick extends ComponentSingletonBase implements IPausable {
     private _uiTransform: UITransform = null!;
     private _parentUITransform: UITransform = null!;
 
+    private _isTouching: boolean = false;
+
     public get isTouching(): boolean {
-        return this.node.active;
+        return this._isTouching;
     }
 
     private _inputVector: Vec2 = new Vec2();
@@ -115,6 +117,8 @@ export class JoyStick extends ComponentSingletonBase implements IPausable {
     private touchStart(event: EventTouch) {
         if (!this._parentUITransform) return;
 
+        this._isTouching = true;
+
         // 更新摇杆底盘位置到触摸点
         const touchUILoc = event.getUILocation();
         this._parentUITransform.convertToNodeSpaceAR(
@@ -172,6 +176,7 @@ export class JoyStick extends ComponentSingletonBase implements IPausable {
 
     private resetTouchState(): void {
         if (!this.isTouching) return;
+        this._isTouching = false;
 
         // 重置圆点位置并隐藏摇杆
         if (this.pole) {
@@ -186,6 +191,7 @@ export class JoyStick extends ComponentSingletonBase implements IPausable {
     }
 
     private showJoyStick(value: boolean) {
+        if (this.node.active === value) return;
         this.node.active = value;
     }
 }

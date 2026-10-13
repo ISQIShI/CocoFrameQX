@@ -1,8 +1,9 @@
-import { _decorator, screen, view, input, ResolutionPolicy, Component, AudioSource, director } from 'cc';
+import { _decorator, AudioSource, Component, ResolutionPolicy, screen, view } from 'cc';
+import { MulticastDelegate } from '../Delegate/MulticastDelegate';
+import { AudioManager } from '../Other/AudioManager';
 import { PlayableSDK } from '../Other/PlayableSDK';
 import { PlayerAction } from '../Other/PrintComponent';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
-import { AudioManager } from '../Other/AudioManager';
 const { ccclass, disallowMultiple } = _decorator;
 
 declare var window;
@@ -19,6 +20,12 @@ export class GameManager extends ComponentSingletonBase {
     private _isPaused: boolean = false;
 
     private _pausableObjectArr: IPausable[] = [];
+
+    private _gameEndEvent: MulticastDelegate<() => void> = new MulticastDelegate<() => void>();
+
+    public get gameEndEvent(): MulticastDelegate<() => void> {
+        return this._gameEndEvent;
+    }
 
     public get isPaused(): boolean {
         return this._isPaused;
@@ -64,10 +71,13 @@ export class GameManager extends ComponentSingletonBase {
         }
     }
 
-    protected gameEnd() {
+    public gameEnd() {
         console.log("游戏结束");
+        AudioManager.musicStop();
         // 游戏正式结束时调用
         PlayableSDK.download(PlayerAction.download);
+
+        this._gameEndEvent.invoke();
     }
 
     public pauseGame(value: boolean) {

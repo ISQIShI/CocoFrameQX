@@ -7,6 +7,10 @@ const { ccclass, property } = _decorator;
 
 @ccclass('Bag')
 export class Bag extends ProductContainer {
+
+    @property({ tooltip: '物品旋转角度' })
+    public itemRotation: Vec3 = new Vec3();
+
     @property({ type: CCFloat, min: 0 })
     public spacingDistance: number = 0.1;
 
@@ -79,9 +83,8 @@ export class Bag extends ProductContainer {
 
     public itemArrive(transferItem: TransferItem): void {
         super.itemArrive(transferItem);
+        transferItem.item.setRotationFromEuler(this.itemRotation);
 
-        // 重置旋转
-        transferItem.item.setRotation(Quat.IDENTITY);
         this.onBagCountChange.invoke(this, true, transferItem.item);
 
         TweenUtil.jelly(transferItem.item, 0.9).start();
