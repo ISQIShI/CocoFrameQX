@@ -23,11 +23,11 @@ export class Bag extends ProductContainer {
     @property({ type: CCFloat, tooltip: '物品移动速度', visible: function (this: Bag) { return this.enablePhysicalEffect; } })
     public itemSpeed: number = 10;
 
-    private _lastWorldPos: Vec3 = new Vec3();
+    protected _lastWorldPos: Vec3 = new Vec3();
 
     public capacity: number = -1; // -1表示无限容量
 
-    private _onBagCountChange: MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void>;
+    protected _onBagCountChange: MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void>;
 
     public get onBagCountChange(): MulticastDelegate<(bag: Bag, isAdd: boolean, item: Node) => void> {
         if (!this._onBagCountChange) {
@@ -60,8 +60,9 @@ export class Bag extends ProductContainer {
                 }
             }
             else {
-                const space = this._items.count == 1 ? 0 : 1 / (this._items.count - 1);
-                const maxOffset = this._items.count * this.physicalOffset;
+                const count = 100;// this._items.count
+                const space = this._items.count == 1 ? 0 : 1 / (count - 1);
+                const maxOffset = count * this.physicalOffset;
                 for (let i = 0; i < this._items.count; i++) {
                     const item = this._items.getElement(i);
                     const t = i * space;

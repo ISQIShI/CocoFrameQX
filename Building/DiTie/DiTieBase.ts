@@ -10,6 +10,10 @@ export abstract class DiTieBase extends Component {
     @property({ type: ColletDiTie, visible: true })
     protected _diTie: ColletDiTie;
 
+    public get diTie(): ColletDiTie {
+        return this._diTie;
+    }
+
     @property({ type: CCFloat, visible: true })
     protected _receiveCoolDown: number = 0.01;
 
@@ -102,7 +106,7 @@ export abstract class DiTieBase extends Component {
 
         product.throwToPos(this.node.worldPosition, 0.35)
             .call(() => {
-                this._diTie.updateScore(this._diTie.targetScore - 1);
+                this._diTie.setScore(this._diTie.targetScore - 1);
                 this.onProductReceived(product);
             })
             .start();

@@ -3,6 +3,10 @@ export class Stack<T> {
 
     private _elements: T[] = [];
 
+    public get elements(): T[] {
+        return this._elements;
+    }
+
     public get count(): number {
         return this._elements.length;
     }

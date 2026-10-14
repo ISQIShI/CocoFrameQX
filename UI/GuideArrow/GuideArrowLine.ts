@@ -1,4 +1,4 @@
-import { _decorator, Color, Component, instantiate, IVec3Like, Node, Prefab, Size, Sprite, UITransform, Vec2, Vec3 } from 'cc';
+import { _decorator, CCFloat, Color, Component, instantiate, IVec3Like, Node, Prefab, Size, Sprite, UITransform, Vec2, Vec3, XrKeyboardEventType } from 'cc';
 import { GlobalPool } from '../../Global/GlobalPool';
 const { ccclass, property } = _decorator;
 
@@ -65,6 +65,9 @@ export class GuideArrowLine extends Component {
     @property({ displayName: '是否启用缩放' })
     public enableScale: boolean = false;
 
+    @property({ displayName: '是否启用Y轴' })
+    public enableYAxis: boolean = false;
+
     @property({
         displayName: '最小缩放',
         visible: function () { return this.enableScale },
@@ -87,6 +90,12 @@ export class GuideArrowLine extends Component {
 
     @property({ displayName: '地面Y轴偏移' })
     public groundYOffset: number = 0.05;
+
+    @property({ type: CCFloat, min: 0, displayName: '自动隐藏距离(米)' })
+    public autoHideDistance: number = 0.5;
+
+    @property({ displayName: '是否在初始化时激活' })
+    public activeOnInit: boolean = false;
 
     private _lineSegments: LineSegmentItem[] = [];
 
@@ -119,6 +128,10 @@ export class GuideArrowLine extends Component {
 
     protected start(): void {
         this.initArrows();
+
+        if (this.activeOnInit) {
+            this._isActive = true;
+        }
     }
 
     protected update(dt: number): void {
@@ -133,10 +146,19 @@ export class GuideArrowLine extends Component {
         }
 
         // 计算路径长度
-        this._pathLength = Vec3.distance(startPos, targetPos);
+        if (this.enableYAxis) {
+            this._pathLength = Vec3.distance(startPos, targetPos);
+        }
+        else {
+            // 仅计算XZ平面距离
+            const xDistance = targetPos.x - startPos.x;
+            const zDistance = targetPos.z - startPos.z;
+            this._pathLength = Math.sqrt(xDistance * xDistance + zDistance * zDistance);
+        }
+
 
         // 如果距离太近，隐藏所有箭头
-        if (this._pathLength < 0.5) {
+        if (this._pathLength < this.autoHideDistance) {
             this.hideAllArrows();
             return;
         }
@@ -190,15 +212,23 @@ export class GuideArrowLine extends Component {
         const tempVec3 = GlobalPool.Vec3Pool.alloc();
         const direction = tempVec3;
         direction.x = targetPos.x - startPos.x;
-        direction.y = 0;
+        direction.y = targetPos.y - startPos.y;
         direction.z = targetPos.z - startPos.z;
         direction.normalize();
+
+        let xRotation = 90;
+        if (this.enableYAxis) {
+            // 计算方向向量与 xz 平面夹角
+            const horizontalLength = Math.sqrt(direction.x * direction.x + direction.z * direction.z);
+            const rotation = Math.atan2(direction.y, horizontalLength) * (180 / Math.PI);
+            xRotation -= rotation;
+        }
 
         const yawRad = Math.atan2(direction.x, direction.z);
         const yawDeg = yawRad * (180 / Math.PI);
         // 设置旋转
         this._lineParent.setWorldPosition(startPos.x, this.groundYOffset, startPos.z);
-        this._lineParent.setWorldRotationFromEuler(90, yawDeg, 0);
+        this._lineParent.setWorldRotationFromEuler(xRotation, yawDeg, 0);
         this._lineParent.getComponent(UITransform).setContentSize(this.actualSegmentWidth, this._pathLength / this._lineParent.worldScale.y);
 
         for (let i = 0; i < this._lineSegments.length; i++) {
@@ -215,6 +245,9 @@ export class GuideArrowLine extends Component {
 
             // 计算坐标
             segment.node.setWorldPosition(startPos.x + distanceAlongPath * direction.x, this.groundYOffset, startPos.z + distanceAlongPath * direction.z);
+            if (this.enableYAxis) {
+                segment.node.setPosition(segment.node.position.x, segment.node.position.y, 0);
+            }
             segment.node.active = true;
 
 

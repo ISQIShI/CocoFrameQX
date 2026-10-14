@@ -166,12 +166,11 @@ export class ColletDiTie extends Component {
                 material.setProperty('albedo', new Color(255, 255, 255, 255));
             }
         }
-        return;
 
-        const miaobian_b = this.node.getChildByPath("Node/miaobian_b");
-        if (miaobian_b) {
-            miaobian_b.active = !value;
-        }
+        // const miaobian_b = this.node.getChildByPath("Node/miaobian_b");
+        // if (miaobian_b) {
+        //     miaobian_b.active = !value;
+        // }
     }
 
     public updateScore(value: number) {
@@ -186,6 +185,13 @@ export class ColletDiTie extends Component {
         this._currentScore = this._targetScore;
         this.updateScoreNumber(Math.floor(this._currentScore / 100 % 10), Math.floor(this._currentScore / 10 % 10), Math.floor(this._currentScore % 10));
         this.updateProgress();
+
+        if (this._currentScore === 0 && this._finishCallBack) {
+            this._finishCallBack(this);
+            if (this._callBackExecuteOnce) {
+                this._finishCallBack = null;
+            }
+        }
     }
 
     public resetScore() {
