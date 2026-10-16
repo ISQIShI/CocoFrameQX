@@ -3,7 +3,7 @@ import { MathUtil } from "./MathUtil";
 
 export class TweenUtil {
     // 投掷到指定位置(世界坐标)
-    public static throwToPos(node: Node, targetPos: IVec3 | (() => IVec3), delay: number, controlPointHeight: number = 2): Tween<Node> {
+    public static throwToPos(node: Node, targetPos: IVec3 | (() => IVec3), delay: number, onUpdate?: () => void, controlPointHeight: number = 2): Tween<Node> {
         const startPos = node.worldPosition.clone();
         const controlPos = new Vec3();
         const tempPos = new Vec3();
@@ -18,6 +18,10 @@ export class TweenUtil {
                 controlPos.z = (startPos.z + tempTargetPos.z) * 0.5;
                 MathUtil.bezierCurve(ratio, startPos, controlPos, tempTargetPos, tempPos);
                 target.setWorldPosition(tempPos);
+
+                if (onUpdate) {
+                    onUpdate();
+                }
             });
         }
         else {
@@ -27,6 +31,10 @@ export class TweenUtil {
                 controlPos.z = (startPos.z + targetPos.z) * 0.5;
                 MathUtil.bezierCurve(ratio, startPos, controlPos, targetPos, tempPos);
                 target.setWorldPosition(tempPos);
+
+                if (onUpdate) {
+                    onUpdate();
+                }
             });
         }
 
@@ -115,27 +123,106 @@ export class TweenUtil {
     /**
      * @zh 果冻效果
      * @param node 节点
-     * @param intensity 强度
+     * @param intensity 强度 (默认 1，0 为无形变，大于 1 增强形变)
      * @param finalScale 最终缩放
      */
     public static jelly(node: Node, intensity: number = 1, finalScale?: IVec3Like) {
         const finalScaleVec3 = new Vec3();
         if (finalScale) {
             finalScaleVec3.set(finalScale.x, finalScale.y, finalScale.z);
-        }
-        else {
+        } else {
             finalScaleVec3.set(node.scale);
         }
 
         const t = tween(node)
-            .set({ scale: finalScaleVec3.clone().multiply3f(0.6, 0.6, 0.6) })
+            .set({ scale: this.getJellyScale(finalScaleVec3, intensity, 0.6, 0.6, 0.6) })
             .to(0.15, { scale: finalScaleVec3 })
-            .to(0.06, { scale: finalScaleVec3.clone().multiply3f(1.4, 0.53, 1.4).multiplyScalar(intensity) })
-            .to(0.12, { scale: finalScaleVec3.clone().multiply3f(0.8, 1.2, 0.8).multiplyScalar(intensity) })
-            .to(0.07, { scale: finalScaleVec3.clone().multiply3f(1.2, 0.7, 1.2).multiplyScalar(intensity) })
-            .to(0.07, { scale: finalScaleVec3.clone().multiply3f(0.85, 1.1, 0.85).multiplyScalar(intensity) })
+            .to(0.06, { scale: this.getJellyScale(finalScaleVec3, intensity, 1.4, 0.53, 1.4) })
+            .to(0.12, { scale: this.getJellyScale(finalScaleVec3, intensity, 0.8, 1.2, 0.8) })
+            .to(0.07, { scale: this.getJellyScale(finalScaleVec3, intensity, 1.2, 0.7, 1.2) })
+            .to(0.07, { scale: this.getJellyScale(finalScaleVec3, intensity, 0.85, 1.1, 0.85) })
             .to(0.07, { scale: finalScaleVec3 });
 
         return t;
+    }
+
+    /**
+     * @zh 计算受强度影响的缩放向量
+     */
+    private static getJellyScale(base: IVec3Like, intensity: number, fx: number, fy: number, fz: number): Vec3 {
+        // 根据强度计算每个轴的实际缩放向量：finalScale * (1 + (factor - 1) * intensity)
+        return new Vec3(
+            base.x * (1 + (fx - 1) * intensity),
+            base.y * (1 + (fy - 1) * intensity),
+            base.z * (1 + (fz - 1) * intensity)
+        );
+    }
+
+    /**
+    * 让UI节点产生一次随机小晃动（带衰减与平滑归位）
+    * @param target 目标UI节点
+    * @param intensity 晃动剧烈程度（默认 10：最大偏移 10 像素，最大旋转 5 度）
+    * @param duration 晃动总持续时间（秒，默认 0.4 秒）
+    */
+    public static shakeUI(target: Node, intensity: number = 10, duration: number = 0.4): Tween<Node> {
+        const originPos = target.position.clone();
+        const originEuler = target.eulerAngles.clone();
+
+        const stepTime = 0.04;
+        const steps = Math.max(2, Math.floor(duration / stepTime));
+        const singleStepDuration = duration / steps;
+
+        const t = tween(target);
+
+        for (let i = 0; i < steps - 1; i++) {
+            const damping = 1 - (i / steps);
+            const curPosRange = intensity * damping;
+            const curAngleRange = (intensity * 0.5) * damping;
+
+            const offsetX = (Math.random() * 2 - 1) * curPosRange;
+            const offsetY = (Math.random() * 2 - 1) * curPosRange;
+            const offsetZAngle = (Math.random() * 2 - 1) * curAngleRange;
+
+            t.to(singleStepDuration, {
+                position: new Vec3(originPos.x + offsetX, originPos.y + offsetY, originPos.z),
+                eulerAngles: new Vec3(originEuler.x, originEuler.y, originEuler.z + offsetZAngle)
+            });
+        }
+
+        return t.to(singleStepDuration, {
+            position: originPos,
+            eulerAngles: originEuler
+        }).start();
+    }
+
+    /**
+    * 让UI节点产生一次左右摇摆晃动（仅Z轴旋转）
+    * @param target 目标UI节点
+    * @param intensity 晃动剧烈程度（默认 15：最大摇摆角度 ±15 度）
+    * @param duration 晃动总持续时间（秒，默认 0.5 秒）
+    */
+    public static wobbleUI(target: Node, intensity: number = 15, duration: number = 0.5): Tween<Node> {
+        const originEuler = target.eulerAngles.clone();
+
+        const steps = 5;
+        const stepTime = duration / steps;
+        let dir = Math.random() > 0.5 ? 1 : -1;
+
+        const t = tween(target);
+
+        for (let i = 0; i < steps - 1; i++) {
+            const damping = 1 - (i / steps);
+            const randomFactor = 0.8 + Math.random() * 0.4;
+            const angleZ = dir * intensity * damping * randomFactor;
+            dir *= -1;
+
+            t.to(stepTime, {
+                eulerAngles: new Vec3(originEuler.x, originEuler.y, originEuler.z + angleZ)
+            }, { easing: 'sineInOut' });
+        }
+
+        return t.to(stepTime, {
+            eulerAngles: originEuler
+        }, { easing: 'sineInOut' }).start();
     }
 }

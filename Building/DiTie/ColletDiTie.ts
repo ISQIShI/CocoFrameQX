@@ -149,10 +149,10 @@ export class ColletDiTie extends Component {
     }
 
     private updateProgress() {
-        let scale = this._currentScore / this._maxScore;
-        if (scale <= 0) scale = 0;
-        this._progress.setScale(0.85, 1, 0.85 * (1 - scale));
-        this._progress.setPosition(0, this._progress.position.y, 4 * scale);
+        let scale = (this._maxScore - (this._currentScore < 0 ? 0 : this._currentScore)) / this._maxScore;
+        if (scale > 1) scale = 1;
+        this._progress.setScale(0.9, 1, 0.9 * scale);
+        this._progress.setPosition(0, this._progress.position.y, 4.325 * (1 - scale));
     }
 
     public updateColor(value: boolean) {

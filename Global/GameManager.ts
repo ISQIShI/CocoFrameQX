@@ -1,4 +1,4 @@
-import { _decorator, AudioSource, Component, ResolutionPolicy, screen, view } from 'cc';
+import { _decorator, AudioSource, Component, EPhysicsDrawFlags, PhysicsSystem, ResolutionPolicy, screen, view } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { AudioManager } from '../Other/AudioManager';
 import { PlayableSDK } from '../Other/PlayableSDK';
@@ -69,6 +69,12 @@ export class GameManager extends ComponentSingletonBase {
         if (window.setLoadingProgress) {
             window.setLoadingProgress(100);
         }
+
+
+        // PhysicsSystem.instance.debugDrawFlags = EPhysicsDrawFlags.WIRE_FRAME;
+        // PhysicsSystem.instance.debugDrawFlags =
+        //     EPhysicsDrawFlags.WIRE_FRAME |
+        //     EPhysicsDrawFlags.AABB;
     }
 
     public gameEnd() {
