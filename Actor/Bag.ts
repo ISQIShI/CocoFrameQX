@@ -1,4 +1,4 @@
-import { _decorator, CCFloat, math, Node, Quat, Vec3 } from 'cc';
+import { _decorator, CCFloat, math, Node, Quat, Tween, Vec3 } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { ProductContainer, TransferItem } from '../Product/ProductContainer';
 import { TweenUtil } from '../Utils/TweenUtil';
@@ -102,6 +102,8 @@ export class Bag extends ProductContainer {
         const item = super.popItem();
         if (item) {
             this.onBagCountChange.invoke(this, false, item);
+            Tween.stopAllByTag(1, item);
+            item.setScale(1, 1, 1);
         }
         return item;
     }
@@ -112,7 +114,7 @@ export class Bag extends ProductContainer {
 
         this.onBagCountChange.invoke(this, true, transferItem.item);
 
-        TweenUtil.jelly(transferItem.item, 0.9).start();
+        TweenUtil.jelly(transferItem.item, 0.8).tag(1).start();
     }
 
     public getItemParent(id: number): Node {
