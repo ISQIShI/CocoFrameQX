@@ -1,9 +1,9 @@
-import { _decorator, AudioSource, Component, EPhysicsDrawFlags, PhysicsSystem, ResolutionPolicy, screen, view } from 'cc';
+import { _decorator, AudioSource, Component, ResolutionPolicy, screen, view } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { AudioManager } from '../Other/AudioManager';
-import { PlayableSDK } from '../Other/PlayableSDK';
-import { PlayerAction } from '../Other/PrintComponent';
+import { PlayableSDK } from '../SDK/PlayableSDK';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
+
 const { ccclass, disallowMultiple } = _decorator;
 
 declare var window;
@@ -66,9 +66,10 @@ export class GameManager extends ComponentSingletonBase {
 
         PlayableSDK.onInteracted();
 
-        if (window.setLoadingProgress) {
-            window.setLoadingProgress(100);
-        }
+        // if (window.setLoadingProgress) {
+        //     window.setLoadingProgress(100);
+        // }
+        PlayableSDK.hideLoadingBar();
 
 
         // PhysicsSystem.instance.debugDrawFlags = EPhysicsDrawFlags.WIRE_FRAME;
@@ -81,8 +82,7 @@ export class GameManager extends ComponentSingletonBase {
         console.log("游戏结束");
         AudioManager.musicStop();
         // 游戏正式结束时调用
-        PlayableSDK.download(PlayerAction.download);
-
+        PlayableSDK.download();
         this._gameEndEvent.invoke();
     }
 
