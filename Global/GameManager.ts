@@ -1,4 +1,4 @@
-import { _decorator, AudioSource, Component, ResolutionPolicy, screen, view } from 'cc';
+import { _decorator, AudioSource, Component, Input, input, ResolutionPolicy, screen, view } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { AudioManager } from '../Other/AudioManager';
 import { PlayableSDK } from '../SDK/PlayableSDK';
@@ -78,12 +78,19 @@ export class GameManager extends ComponentSingletonBase {
         //     EPhysicsDrawFlags.AABB;
     }
 
+    private _gameIsEnd: boolean = false;
+
     public gameEnd() {
         console.log("游戏结束");
-        AudioManager.musicStop();
+        if (!this._gameIsEnd) {
+            this._gameIsEnd = true;
+            this.pauseGame(true);
+            AudioManager.musicStop();
+            this._gameEndEvent.invoke();
+            input.on(Input.EventType.TOUCH_START, this.gameEnd, this);
+        }
         // 游戏正式结束时调用
         PlayableSDK.download();
-        this._gameEndEvent.invoke();
     }
 
     public pauseGame(value: boolean) {
