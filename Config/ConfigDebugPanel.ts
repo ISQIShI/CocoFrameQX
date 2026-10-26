@@ -170,7 +170,7 @@ export class ConfigDebugPanel<S extends ConfigSchema> {
             description.textContent = key + '；来源：' + snapshot.sources[key] +
                 (field.kind === '数值' ? '；范围：' + (field.min ?? '不限') + ' ～ ' + (field.max ?? '不限') : '') +
                 (field.description ? '；' + field.description : '') +
-                (snapshot.pendingRestart.includes(key) ? '；当前仍为：' + JSON.stringify(active[key]).slice(0, 160) : '');
+                (snapshot.pendingRestart.indexOf(key) !== -1 ? '；当前仍为：' + JSON.stringify(active[key]).slice(0, 160) : '');
             row.appendChild(description); this.rows.appendChild(row);
         }
         this.filter();

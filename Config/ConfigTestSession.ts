@@ -89,7 +89,7 @@ export class ConfigTestSession<S extends ConfigSchema> {
     /** 生成携带全部目标值的复现链接；不访问网络、不自动复制或跳转。 */
     shareURL(): string {
         this.assertEnabled();
-        if (!this.url || !['http:', 'https:'].includes(this.url.protocol))
+        if (!this.url || ['http:', 'https:'].indexOf(this.url.protocol) === -1)
             throw new ConfigError(['复现链接需要通过 HTTP 或 HTTPS 打开的测试页面，请改用 JSON']);
         const result = new URL(this.url.href);
         result.searchParams.set('qxConfig', '1');

@@ -38,7 +38,8 @@ function safeKey(key: string): boolean {
 /** 复制并验证有限 JSON 数据，同时限制递归深度和节点数，拒绝循环与非数据对象。 */
 function copyValue(input: unknown, depth = 0, budget = { remaining: 20000 }): ConfigValue {
     if (depth > 24 || --budget.remaining < 0) throw new ConfigError(['配置数据层级或数量超过限制']);
-    if (input === null || typeof input === 'string' || typeof input === 'boolean') return input;
+    if (input === null) return null;
+    if (typeof input === 'string' || typeof input === 'boolean') return input;
     if (typeof input === 'number' && Number.isFinite(input)) return input;
     if (Array.isArray(input)) return input.map(value => copyValue(value, depth + 1, budget));
     if (isRecord(input)) {
@@ -142,7 +143,7 @@ export class ConfigStore<S extends ConfigSchema> {
 
     /** 合并某层的少量字段；删除覆盖请用完整替换，不用空值模拟删除。 */
     patchLayer(layer: ConfigLayer, values: unknown): void {
-        if (!LAYERS.includes(layer)) throw new ConfigError(['未知配置层：' + layer]);
+        if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
         const patch = this.readPatch(values);
         this.replaceLayer(layer, { ...this.layers[layer], ...patch });
     }
@@ -153,7 +154,7 @@ export class ConfigStore<S extends ConfigSchema> {
         if (!isRecord(updates)) throw new ConfigError(['配置层更新必须为对象']);
         const next = { ...this.layers };
         for (const key of Object.keys(updates)) {
-            if (!LAYERS.includes(key as ConfigLayer)) throw new ConfigError(['未知配置层：' + key]);
+            if (LAYERS.indexOf(key as ConfigLayer) === -1) throw new ConfigError(['未知配置层：' + key]);
             next[key as ConfigLayer] = this.readPatch(updates[key as ConfigLayer]);
         }
         const desired = this.combine(next);
@@ -184,7 +185,7 @@ export class ConfigStore<S extends ConfigSchema> {
             try { parsed = JSON.parse(input); }
             catch { throw new ConfigError(['配置不是有效的 JSON 文本']); }
         }
-        if (!isRecord(parsed) || Object.keys(parsed).some(key => !['format', 'project', 'version', 'values'].includes(key)) ||
+        if (!isRecord(parsed) || Object.keys(parsed).some(key => ['format', 'project', 'version', 'values'].indexOf(key) === -1) ||
             parsed.format !== 1 || parsed.project !== this.project || parsed.version !== this.version)
             throw new ConfigError(['配置格式、项目标识或版本不匹配，未导入']);
         return { format: 1, project: this.project, version: this.version, values: this.readPatch(parsed.values) };
@@ -254,7 +255,7 @@ export class ConfigStore<S extends ConfigSchema> {
                 (!field.integer || Number.isInteger(value)); break;
             case '开关': valid = typeof value === 'boolean'; break;
             case '文本': valid = typeof value === 'string' && value.length <= (field.maxLength ?? 1024); break;
-            case '选项': valid = typeof value === 'string' && field.choices.includes(value); break;
+            case '选项': valid = typeof value === 'string' && field.choices.indexOf(value) !== -1; break;
             case '数据':
                 try { valid = field.accepts(freeze(value)); }
                 catch { valid = false; }
