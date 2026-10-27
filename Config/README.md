@@ -1,203 +1,176 @@
 # 通用玩法配置系统
 
-面向 PA 项目的快速实现和调试：程序声明参数与约束，测试人员在 Web 测试包中修改、保存、导入导出和分享配置。无需后端服务，无需为调参重写游戏常量或每次重新打包。
+面向 PA 项目的快速实现和调试：程序在一处声明参数与约束，测试人员在 Web 测试包中修改、保存、导入导出和分享配置。无需后端服务，无需为调参重写游戏常量或每次重新打包。
 
-本模块独立于具体玩法，ConfigExample 只展示调用方式，不会自动接入或修改场景。各项目在业务目录声明自己的参数和组件适配器，示例数值不代表项目策划规则。
+本模块独立于具体玩法，ConfigExample 只展示调用方式，不会自动接入或修改场景。各项目在业务目录声明自己的参数和组件绑定，示例数值不代表项目策划规则。
 
-兼容性维护（2026-10-26）：兼容 Creator 默认 ES2015 声明库及 isolatedModules；数组成员检查使用 indexOf，未知 JSON 输入先单独判断 null，确保 strict 开关两种模式都能编译。业务不得通过提高检查工具的目标库掩盖实际工程诊断。
+兼容性：兼容 Creator 默认 ES2015 声明库及 isolatedModules；strict 开关开启或关闭都能编译。核心不依赖 `cc`，不创建全局单例。
+
+2026-10-27 重构：新增链式字段构建器、嵌套定义与类型化读取视图、链式启动和组件绑定器；面板只提交改动并按分组折叠；保存与分享只携带改动，文档宽松导入并支持版本迁移；实时与重启参数组合非法时整体推迟到重启。旧的 `numberField` 等工厂与 `new ConfigStore` 用法继续有效。
 
 ## 1. 文件与职责
 
 | 文件 | 职责 |
 | --- | --- |
-| ConfigTypes.ts | 字段声明、类型推导、配置文件格式、中文校验错误 |
-| ConfigStore.ts | 默认值与分层覆盖、整批校验、只读快照、变更订阅、生效时机 |
+| ConfigTypes.ts | 字段声明、类型推导、文档格式、更新结果、中文校验错误 |
+| ConfigBuilder.ts | 链式字段构建器：`num / bool / text / choice / json / vec / color` |
+| ConfigDefinition.ts | `defineConfig / group`：嵌套定义 → 扁平配置表、默认值和类型化读取视图 |
+| ConfigSetup.ts | `definition.setup(...)…start()` 链式启动，返回 `ConfigRuntime` |
+| ConfigBinder.ts | 把现有组件属性登记为配置字段，启动时写入、退出时恢复 |
+| ConfigStore.ts | 默认值与分层覆盖、整批校验、只读快照、变更订阅、生效时机、文档导入导出 |
 | ConfigTestSession.ts | 测试开关、本地保存/恢复、URL 复现、缓存隔离 |
-| ConfigDebugPanel.ts | 独立 Web 面板，自动生成控件、搜索、JSON 文件交互 |
+| ConfigDebugPanel.ts | 独立 Web 面板，按分组生成控件、搜索、JSON 文件交互 |
 | CocosConfigLoader.ts | 可选的 JsonAsset / resources 项目配置加载 |
-| ConfigExample.ts | 可运行的声明和启动示例，不自动注册、不修改现有游戏 |
+| ConfigExample.ts | 可运行的声明和启动示例 |
 | index.ts | 核心及 Web 工具出口；引擎加载器使用独立导入 |
 
-核心不依赖 cc，不创建全局单例，也不依赖 ServiceLocator。项目可导出自己的容器实例，或把实例登记到已有服务定位器，避免多个入口重复创建。
+## 2. 最快接入：一处声明、一条链启动
 
-## 2. 优先级与生效时机
+```typescript
+import { defineConfig, group, num, bool, choice, color } from './CocoFrameQX/Config';
 
-优先级从低到高：
+export const GAME = defineConfig({
+    launch: group('发射', {
+        minSpeed: num(12).label('最小发射速度').range(0.1, 100).live(),
+        maxSpeed: num(28).label('最大发射速度').range(0.1, 100).live(),
+        cooldown: num(0.2).label('发射冷却').range(0, 5).step(0.05).live().describe('单位秒'),
+    }),
+    physics: group('物理', {
+        gravity: num(-14).label('重力').range(-100, -0.1),          // 默认“重启”生效
+        substeps: num(6).label('每帧最大物理步数').range(1, 30).int(),
+    }),
+    debug: group('调试', {
+        bounds: bool(false).label('显示边界').live(),
+        tint: color([255, 80, 80, 255]).label('边界颜色').live(),
+        mode: choice('普通', ['普通', '简单'] as const).label('模式'),
+    }),
+}, { timingNotes: { 重启: '保存后重新打开页面生效' } });
+
+// 业务读取：带类型、只读；未启动时为声明默认值。
+GAME.values.launch.minSpeed;   // number
+GAME.values.debug.mode;        // '普通' | '简单'
+GAME.values.debug.tint;        // readonly number[]
+```
+
+```typescript
+// 唯一游戏入口，在创建刚体、场地等实际对象之前调用。
+const runtime = GAME.setup('项目唯一标识', 1)
+    .validate(v => v.launch.minSpeed <= v.launch.maxSpeed ? [] : ['最小发射速度不能大于最大速度'])
+    .projectDocument(projectJsonAsset?.json)          // 可选，包内项目层
+    .testTools({ enabled: 测试包, onPanelVisibilityChange: visible => 暂停或恢复输入(visible) })
+    .onChange(snapshot => { if (snapshot.changed.indexOf('debug.bounds') !== -1) 刷新边界(); })
+    .start();
+runtime.warnings.forEach(text => console.warn(text));
+runtime.panel.mount();          // 游戏就绪后再挂载面板
+// onDestroy：runtime.dispose();  幂等，读取视图回到默认值，扩展写入的组件值被恢复
+```
+
+- 字段方法：`label` 标题（省略时用键名）、`describe` 说明、`live` 实时 / `restart` 重启（默认）、数值与向量的 `range / min / max / int / step`、文本的 `maxLength`。
+- `group(标题, 子项)` 成为面板分组，多层以“·”连接（如“动物物理·小鸡”）；普通嵌套对象只扩展键路径。键名不能含点号。
+- 扁平键由路径拼接，如 `launch.minSpeed`、`animals.1.radius`；JSON、面板、`store.get` 都使用扁平键。
+- 子组可以由程序生成，例如按等级循环创建 `group(名称, {...})` 放入 `Record<string, …>`，读取时 `values.animals[level].radius`。
+- 跨字段校验函数收到嵌套值 `v` 与全部扁平值 `flat`（含扩展字段），返回中文问题列表；必须是纯检查。
+- `start()` 的固定顺序：创建容器 → 项目层 → 本地与链接 → 锁定重启参数 → 接入定义 → 应用扩展 → 订阅。任一步失败会撤销已完成的接入后抛出。
+- 同一定义同一时刻只能接入一个运行容器；第二个入口启动会报错，不会污染当前值。
+
+## 3. 绑定现有组件属性
+
+场景里已有组件的数值（引导线长度、布局坐标、碰撞器尺寸、颜色等）不必搬进声明，用绑定器登记：默认值取自组件当前值，启动后写入生效值，退出时恢复原值，不保存场景。
+
+```typescript
+const scene = new ConfigBinder({ description: '默认值取自当前场景', guard: target => isValid(target) });
+scene.scope('scene.aim', '瞄准线')
+    .value(aimGuide, 'length', '世界长度', { min: 0.1, max: 50 })
+    .vector(aimGuide, 'color', ['r', 'g', 'b', 'a'], '颜色', { min: 0, max: 255 });
+scene.scope('scene.board', '场地')
+    .position(spawnAnchor, '发射点', { name: 'spawn' })
+    .vector(groundCollider, 'size', ['x', 'y', 'z'], '地面碰撞尺寸', { min: 0.001, max: 1000 });
+
+GAME.setup('项目', 1).extend(scene)…start();
+```
+
+- `value` 自动识别数值、开关、文本；`vector` 复制当前对象（优先 `clone()`）后整体赋值，触发引擎属性 setter；`position` 通过 `setPosition(x, y, z)` 写入；`custom` 登记任意字段与写入函数。
+- `guard` 返回假时跳过写入，用于已销毁的组件。绑定默认“重启”生效：只在启动时写一次，不在运行中搬动物体。
+- 自定义扩展只需实现 `{ schema, apply(store), restore() }`。
+
+## 4. 优先级与生效时机
 
 ```text
 字段声明默认值 < 项目配置文件 < 本地保存配置 < 本次会话（链接、面板、导入）
 ```
 
-字段键采用 `launch.minSpeed` 等稳定字符串，点号只作命名，不会按路径修改其他对象。数字、开关、文本、选项及经过业务校验的 JSON 表格都可使用。数组和对象字段整体替换，不按下标拼接；缺省字段继承低优先级，0、false、空文本均为合法覆盖，null 不代表删除。
+数组和对象字段整体替换，不按下标拼接；0、false、空文本均为合法覆盖，null 不代表删除。
 
 | 时机 | 行为 | 适用 |
 | --- | --- | --- |
 | 实时 | 应用成功后更新当前值并通知订阅者 | 下一次发射速度、效果开关、音量等能明确响应变化的参数 |
 | 重启 | 启动前正常应用；start 后只更新目标值，当前局保持原值 | 重力初始化、场地尺寸、初始数量、随机种子、关卡表 |
 
-默认是“重启”。`store.start()` 表示配置启动阶段结束，不是启动游戏的引擎指令。它不能再次调用来让待重启项生效；需要新建容器并重新执行游戏初始化。网页测试通常先保存再刷新，或用生成的链接重新打开。配置系统不为现有游戏增加重开按钮。
+**实时仅代表容器里的值更新。** 业务在使用点读取 `values`，或订阅后按 `snapshot.changed` 只处理变化的键。持有旧快照或启动时解构出的数值不会自动改变。
 
-**实时仅代表容器里的值更新。** 业务需要在使用点调用 `get`，或订阅后按自己的安全时点更新缓存/表现。系统不会自动查找节点、修改刚体或改写已有 GAME_CONFIG 常量。持有旧快照或启动时解构出的数值不会自动改变。
+目标值的字段与跨字段规则必须通过，否则整次更新失败。启动后若“实时新值 + 本局重启旧值”的组合非法（例如同时提高速度上限〔重启〕和发射速度〔实时〕），本次改动**整体推迟到重启**：当前值不变，相关字段列入待重启，更新结果为 `{ changed: true, deferred: true }`，面板给出提示。
 
-全部字段、目标配置的跨字段规则、当前运行组合的跨字段规则均通过后才提交。任何错误使整次更新不生效。若一个实时字段与一个待重启字段必须一起变更，建议将整组设为“重启”，避免出现本局非法组合。
+## 5. 保存、导入导出与版本
 
-## 3. 最快接入
-
-先用示例确认操作方式。在项目自己的入口中调用一次：
-
-```typescript
-import { createExampleConfig } from './CocoFrameQX/Config/ConfigExample';
-
-// 由项目明确决定：测试包可以为 true，普通发布包设为 false。
-// 不要让 URL 自己决定是否允许打开测试工具。
-const tuning = createExampleConfig({
-    allowTestTools: true,
-    onPanelVisibilityChange: visible => {
-        // 给现有输入系统添加或移除“配置面板”暂停原因。
-        // 不要在关闭面板时清除后台、结束等其他暂停原因。
-        console.log(visible ? '配置面板已打开' : '配置面板已关闭');
-    },
-});
-
-// 后续业务使用时读取；这里仅展示读取，不改变 AnimalMerge。
-const nextShotSpeed = tuning.store.get('launch.minSpeed');
-console.log('下一发速度', nextShotSpeed);
-
-// 若业务确实需要主动响应变化，保留解绑函数。
-const unsubscribe = tuning.store.subscribe(snapshot => {
-    console.log('当前速度', snapshot.active['launch.minSpeed']);
-    console.log('待重启字段', snapshot.pendingRestart);
-});
-
-// 项目入口销毁时调用。
-unsubscribe();
-tuning.dispose();
-```
-
-上例最后两行是退出阶段示意，实际项目中应放在 onDestroy，而不是启动后立即执行。首次启动允许面板时右上角出现“参数”入口；URL 中添加 `qxConfig=1` 可直接展开面板。此参数只控制显示，不绕过项目的调试开关。
-
-要定义自己的参数：
-
-```typescript
-import { ConfigStore, numberField, booleanField, choiceField } from './CocoFrameQX/Config';
-
-const config = new ConfigStore({
-    project: '项目唯一标识',
-    version: 1,
-    schema: {
-        'launch.min': numberField(10, { label: '最低速度', group: '发射', min: 1, max: 80, timing: '实时' }),
-        'launch.max': numberField(25, { label: '最高速度', group: '发射', min: 1, max: 80, timing: '实时' }),
-        'debug.bounds': booleanField(false, { label: '显示边界', timing: '实时' }),
-        'level.mode': choiceField('普通', ['普通', '简单'] as const, { label: '关卡模式' }),
-    },
-    validate: values => values['launch.min'] <= values['launch.max'] ? [] : ['最低速度不能超过最高速度'],
-});
-
-config.get('launch.min'); // 推导为 number。
-config.get('level.mode'); // 选项使用 as const，可保留字符串联合类型。
-```
-
-复杂表格使用 `jsonField<T>(默认值, { label, accepts })`，accepts 必须为类型守卫，验证行数、字段、范围和业务关系；不要仅返回 true。字段及跨字段校验函数必须是纯检查，不在校验中修改容器、引擎对象或触发外部行为。数字不接受数值字符串、NaN 或 Infinity。所有对外快照递归冻结，不能通过数组 push 等方式绕开配置更新。
-
-## 4. Cocos 项目配置与启动顺序
-
-项目层文件与调试导入文件使用同一格式。示例：
+文档格式：
 
 ```json
-{
-  "format": 1,
-  "project": "通用玩法示例",
-  "version": 1,
-  "values": {
-    "launch.minSpeed": 12,
-    "launch.maxSpeed": 28,
-    "physics.gravity": -14
-  }
-}
+{ "format": 1, "project": "项目唯一标识", "version": 1, "values": { "launch.minSpeed": 12 } }
 ```
 
-将需要随包携带的项目文件交给 Cocos 正常导入，可作为 JsonAsset 引用，或放到 `assets/resources/config/玩法.json`。上面的 project、version、字段键必须与项目自己的声明一致。这里展示路径约定，不自动创建或替换项目资源。
+- **保存到本机与复现链接只携带改动**：本地/会话层中相对“默认 + 项目层”真正不同的值。代码调整默认值后，未改动过该字段的测试者会自动用上新默认值。面板另有“导出全部”，用于生成完整的项目配置文件。
+- **导入默认宽松**：未知键（字段改名或删除）和单字段非法值逐项跳过并返回中文提示，其余值照常导入；跨字段规则仍整批校验，失败则整份不导入。`importDocument(doc, 层, { strict: true })` 保留严格行为。
+- **版本**：等于当前版本直接导入；低于当前版本先调用 `.migrate((values, fromVersion) => 新值)`，未提供迁移时按当前声明宽松导入并提示；高于当前版本或项目标识不符时拒绝。字段语义改变才需要递增 version，单纯增删字段不必递增。
+- 本地缓存键为 `qx-config:<项目>`，不再按版本隔离；恢复时兼容读取旧的 `:v<版本>` 键，下次保存或清除时移除。
 
-```typescript
-import { ConfigTestSession, ConfigDebugPanel } from './CocoFrameQX/Config';
-import { loadProjectConfig } from './CocoFrameQX/Config/CocosConfigLoader';
+## 6. Cocos 项目配置文件
 
-// config 是上一节创建的容器。
-// 这段流程应在唯一游戏入口显式等待，不依赖不同组件 start 的执行顺序。
-await loadProjectConfig(config, 'config/玩法', 5000);
-const session = new ConfigTestSession(config, { enabled: true });
-const warnings = session.restore();
-warnings.forEach(text => console.warn(text));
-config.start();
-const panel = new ConfigDebugPanel(session);
-panel.mount();
-// 现在才创建刚体、场地、关卡等实际游戏对象。
-```
+项目层文件可作为 JsonAsset 在 Inspector 引用，把 `asset.json` 交给 `.projectDocument()`；或放到 `assets/resources/config/` 后用 `loadProjectConfig(store, 'config/玩法')` 加载（需在 `store.start()` 之前，适用于直接使用 ConfigStore 的写法）。Cocos 不会等待组件 start 中的 Promise，异步加载必须由唯一入口显式等待。不要在运行中重新加载项目资源来偷偷改变初始化参数。
 
-如果已通过 Inspector 得到 JsonAsset，可用 `applyProjectConfig(config, jsonAsset)`，无需异步加载。没有项目 JSON 时可直接使用声明默认值。
+## 7. 策划在测试包中的操作
 
-Cocos 不会因为某个组件的 start 返回 Promise 就自动等待所有其他组件。游戏主入口必须集中控制加载、恢复和游戏创建。加载失败/超时会拒绝 Promise，调用方决定显示错误或明确使用默认值；迟到回调不再写配置。不要在已经运行的局中重新加载项目资源来偷偷改变初始化参数。
+1. 打开 Web 测试包（HTTP/HTTPS），点击右上角“参数”。参数按分组折叠，可搜索标题、分组或参数键；搜索时自动展开命中分组。
+2. 修改后点击“应用参数”，只提交改动过的字段，来源列显示每个值来自默认、项目、本地还是会话。没有改动时提示“没有改动”。
+3. 实时字段按业务接入逻辑生效；重启字段需“保存到本机”后刷新页面。
+4. “导出改动”“下载 JSON”输出相对项目参数的改动；“导出全部”输出完整目标值；导入支持粘贴文本或选择文件，跳过的内容会列在状态栏。
+5. “生成复现链接”携带改动，可复制给程序或其他测试人员。配置过大时改传 JSON。
+6. “恢复项目参数”清除本地/本次覆盖，保留包内项目层；它不立即重建当前局。若地址仍带 qxValues，需要移除该参数或换新链接。
 
-初始化顺序固定为：创建容器 → 应用项目层 → 恢复本地与链接 → start → 创建实际游戏 → 可选面板。无效本地/链接文件返回中文告警并保留上一有效配置，不删除旧文件，便于定位问题。
+外部代码提交新版本时面板重建控件，未应用的面板草稿会被新配置覆盖；用户折叠的分组保持折叠。本地缓存保存在当前浏览器/来源；存储被禁用或配额不足时明确提示，仍可本次调参和导出。复现链接长度上限 8000 字符，配置文本导入上限 64K 字符。分享的是配置，不是存档。
 
-## 5. 策划在测试包中的操作
+## 8. 测试包与正式发布边界
 
-1. 打开程序提供的 Web 测试包地址，点击右上角“参数”。使用 HTTP/HTTPS 测试服务；直接双击 file:// 页面不是推荐的 Cocos Web 包运行方式。
-2. 搜索字段，修改数值，点击“应用参数”。面板会显示来源、约束、实际仍在使用的值及待重启数量。
-3. 实时字段按业务接入逻辑生效；重启字段需先“保存到本机”，再刷新整个测试页面。
-4. “导出 JSON”输出可复制文本，“下载 JSON”生成文件；另一台设备可粘贴文本或选择 JSON 文件导入。
-5. “生成复现链接”携带完整目标配置，可复制给程序或其他测试人员。配置过大时改传 JSON。
-6. “恢复项目参数”清除本地/本次覆盖，保留包内项目层；它不立即重建当前局。若地址仍带 qxValues，需要移除该参数或换新链接，否则下次打开还会加载链接覆盖。
-
-“保存、导出、下载、生成链接”都会先校验并应用面板当前输入；无效输入阻止该动作。单独“导入 JSON”使用文本框/文件内容。外部代码提交新版本时面板重建控件，未应用的面板草稿会被新配置覆盖。
-
-保存导出的是**完整目标值**，因此适合复现，也会固定当前版本的默认值。项目调整字段语义、结构或不希望旧默认值继续覆盖时，应递增 version；旧版本文件和缓存不会自动迁移。新版本仍需兼容旧值时，业务显式迁移后再导入。
-
-本地缓存按项目标识和版本隔离，保存在当前浏览器/来源，换浏览器、域名、端口或清理网站数据可能不再出现。存储被禁用或配额不足时明确提示，仍可本次调参和导出。退出后不会自动保存，避免临时试验影响之后的测试。
-
-复现链接保留其他查询参数和片段标识；长度限制为 8000 字符，配置文本导入上限为 64K 字符。分享的是配置，不是存档；随机种子只有在业务随机源实际使用该字段时才有作用，也不保证物理求解跨设备完全一致。
-
-## 6. 测试包与正式发布边界
-
-- 由项目显式传入 `enabled / allowTestTools`。关闭后不读取测试缓存或 URL，不创建面板，不提供保存、清除和分享操作；正常项目配置照常使用。
+- 由项目显式传入 `testTools({ enabled })`。关闭后不读取测试缓存或 URL，不创建面板，不提供保存、清除和分享操作；项目配置照常使用。
 - 测试工具不请求远端配置，配置字符串仅作为数据解析。
-- 核心适用于 Web、原生及纯逻辑测试。Web 面板依赖 DOM、Shadow DOM 和文件下载能力；原生/无 DOM 环境不会创建它，可复用 ConfigStore 与 ConfigTestSession 的存储接口，另接项目自己的 Cocos UI。
-- 可将 `sys.localStorage` 通过 options.storage 传入测试会话；存储访问仍经过同样的错误处理。不给 URL 时原生环境不支持链接分享。
-- UI 内的触摸、鼠标和键盘事件会停止冒泡。若项目在 window/document 捕获阶段监听输入，必须使用 onVisibilityChange 协调输入暂停；不能假定 DOM 冒泡拦截能覆盖所有第三方输入实现。
-- 加载器只使用正常的 JsonAsset / resources API，不改 Cocos 引擎、打包器或现有框架服务。测试包是否把调试工具剔除由项目构建策略决定，关闭开关是运行行为控制。
+- 核心适用于 Web、原生及纯逻辑测试。Web 面板依赖 DOM、Shadow DOM 和文件下载能力；原生/无 DOM 环境不会创建它。可将 `sys.localStorage` 通过 `storage` 传入。
+- 面板内的触摸、鼠标和键盘事件停止冒泡。若项目在 window/document 捕获阶段监听输入，必须用 `onPanelVisibilityChange` 协调输入暂停。
 
-## 7. 常用维护 API
+## 9. 常用 API
 
 | 操作 | API |
 | --- | --- |
-| 读取当前生效值 | `store.get(key)` |
-| 查看目标、来源与待重启字段 | `store.snapshot()` |
-| 合并少量测试覆盖 | `store.patchLayer('会话', { 'launch.min': 12 })` |
-| 替换覆盖层，空对象撤销 | `store.replaceLayer('会话', {})` |
-| 同时替换多层，保证原子性 | `store.replaceLayers({ 本地: {}, 会话: {} })` |
-| 文件导入/导出 | `store.importDocument(json)` / `store.exportJSON()` |
-| 观察成功提交 | `store.subscribe(listener)`，返回解绑函数 |
+| 读取当前生效值 | `definition.values.组.键`，或 `store.get('组.键')` |
+| 查看目标、来源、待重启与本次变化 | `store.snapshot()` |
+| 合并少量覆盖 | `store.patchLayer('会话', { 'launch.minSpeed': 12 })`，返回 `{ changed, deferred }` |
+| 替换覆盖层，空对象撤销 | `store.replaceLayer('会话', {})` / `store.replaceLayers({ 本地: {}, 会话: {} })` |
+| 导入 / 导出 | `store.importDocument(json)` 返回跳过提示；`store.exportJSON('改动' 或 '全部')` |
+| 观察成功提交 | `store.subscribe(listener)` 或 `setup.onChange(listener)` |
 | 保存、恢复、重置、分享 | `session.save / restore / reset / shareURL` |
-| 清理 Web 面板 | `panel.dispose()` |
+| 释放 | `runtime.dispose()` |
 
-监听异常不回滚已提交配置，也不阻断其他观察者。通知中同步改写配置会报错，避免递归通知和前后版本混乱；需要连带更新时，应在提交前一起计算，或在业务下一次更新时发起新事务。无需修改业务规则的联动优先通过读取同一快照完成。
+监听异常不回滚已提交配置，也不阻断其他观察者。通知中同步改写配置会报错；需要连带更新时，应在提交前一起计算，或在业务下一次更新时发起新事务。
 
-## 8. 验证与开发工具
+新增字段类型时，在 `ConfigStore.ts` 的 `KIND_CHECKS` 与面板的 `control` 各加一项，并在 ConfigTypes 中声明字段接口。
 
-开发测试位于工程根 `tools/coco-frame-qx/`，不在 assets 中。使用本项目生成的 temp 引擎声明及对应 TypeScript，不额外安装游戏运行依赖。
+## 10. 验证与开发工具
+
+开发测试位于工程根 `tools/coco-frame-qx/`，不在 assets 中，使用本项目生成的 temp 引擎声明及对应 TypeScript。
 
 ```text
 node tools/coco-frame-qx/config.test.cjs
-```
-
-当前包含 21 项核心/存储/加载器检查，以及严格类型检查和错误类型调用样例。检查覆盖覆盖顺序、非法输入不部分提交、实时/重启关系、只读性、监听、JSON 身份版本、缓存权限、URL 复现与迟到回调。
-
-可选浏览器测试需要本机已有 Playwright 与兼容浏览器：
-
-```text
 node tools/coco-frame-qx/config-panel.test.cjs <Playwright模块绝对路径> <浏览器可执行文件绝对路径>
 ```
 
-该测试使用独立无头浏览器和内存网页，验证编辑、JSON、下载、保存恢复、搜索、窄屏、输入隔离与销毁，不启动真实游戏或访问远端服务。验证结果与未覆盖范围应在每次交付中如实说明；本模块接入具体项目后仍需少量真实场景核对。
+第一条包含严格类型检查（含嵌套定义推导和错误键的编译期断言）与 28 项核心、构建器、链式启动、绑定器、存储和加载器检查；第二条用独立无头浏览器和内存网页验证 6 组面板行为。
 
-2026-10-26 交付验证：严格类型检查无诊断，21 项核心/存储/加载检查通过；独立无头 Edge 的 5 组面板检查通过，包含 375×667 窄屏和点击隔离。未运行真实 Cocos Preview、实际打包产物或原生包；当前玩法尚未迁移到本系统。
+2026-10-27 交付验证：严格及项目实际非严格类型检查无诊断；28 项核心检查与 6 组无头 Edge 面板检查通过；AnimalMerge 已迁移到本系统并通过其 63 项逻辑及 3 组面板检查。未运行真实 Cocos Preview、实际打包产物或原生包。

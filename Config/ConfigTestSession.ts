@@ -22,16 +22,19 @@ export interface ConfigTestOptions {
 export class ConfigTestSession<S extends ConfigSchema> {
     readonly enabled: boolean;
     readonly storageKey: string;
+    /** 旧版本按配置版本隔离的缓存键，恢复时兼容读取，保存或清除时一并移除。 */
+    readonly legacyStorageKey: string;
     readonly panelRequested: boolean;
     private readonly storage: ConfigStorage | null;
     private readonly url: URL | null;
     private readonly startupIssues: string[] = [];
     private restored = false;
 
-    /** 绑定一个项目容器，隔离项目及配置版本的本地缓存。 */
+    /** 绑定一个项目容器，按项目隔离本地缓存；版本差异由文档版本号与迁移处理。 */
     constructor(readonly store: ConfigStore<S>, options: ConfigTestOptions) {
         this.enabled = options.enabled;
-        this.storageKey = 'qx-config:' + encodeURIComponent(store.project) + ':v' + store.version;
+        this.storageKey = 'qx-config:' + encodeURIComponent(store.project);
+        this.legacyStorageKey = this.storageKey + ':v' + store.version;
         this.storage = null;
         this.url = null;
         if (this.enabled) {
@@ -46,7 +49,10 @@ export class ConfigTestSession<S extends ConfigSchema> {
         this.panelRequested = !!(this.enabled && this.url?.searchParams.get('qxConfig') === '1');
     }
 
-    /** 在 store.start 和游戏创建之前恢复本地及链接配置；错误逐项返回，保留上一有效层。 */
+    /**
+     * 在 store.start 和游戏创建之前恢复本地及链接配置；错误逐项返回，保留上一有效层。
+     * 宽松导入跳过的未知键或非法字段同样作为提示返回，其余有效值照常应用。
+     */
     restore(): readonly string[] {
         if (!this.enabled) return [];
         if (this.restored) return [];
@@ -54,24 +60,26 @@ export class ConfigTestSession<S extends ConfigSchema> {
         this.restored = true;
         const issues = [...this.startupIssues];
         try {
-            const saved = this.storage?.getItem(this.storageKey);
-            if (saved !== null && saved !== undefined) this.store.importDocument(saved, '本地');
+            let saved = this.storage?.getItem(this.storageKey);
+            if (saved === null || saved === undefined) saved = this.storage?.getItem(this.legacyStorageKey);
+            if (saved !== null && saved !== undefined) issues.push(...this.store.importDocument(saved, '本地').map(text => '本地配置：' + text));
         } catch (error) { issues.push('本地配置未应用：' + message(error)); }
         try {
             const text = this.url?.searchParams.get('qxValues');
-            if (text !== null && text !== undefined) this.store.importDocument(text, '会话');
+            if (text !== null && text !== undefined) issues.push(...this.store.importDocument(text, '会话').map(item => '链接配置：' + item));
         } catch (error) { issues.push('链接配置未应用：' + message(error)); }
         return issues;
     }
 
-    /** 将完整目标配置保存到本浏览器；失败时明确报错，不伪造保存成功。 */
+    /** 将相对项目基准的改动保存到本浏览器；失败时明确报错，不伪造保存成功。 */
     save(): void {
         this.assertEnabled();
         if (!this.storage) throw new ConfigError(['当前环境没有可用的本地存储，请导出 JSON 保存']);
-        const text = this.store.exportJSON();
+        const text = this.store.exportJSON('改动');
         if (text.length > CONFIG_TEXT_LIMIT) throw new ConfigError(['配置超过本地恢复的 64K 字符限制，请缩减配置']);
         try { this.storage.setItem(this.storageKey, text); }
         catch { throw new ConfigError(['本地保存失败，可能存储空间不足或访问被禁止，请导出 JSON']); }
+        try { this.storage.removeItem(this.legacyStorageKey); } catch { /* 旧缓存只是兼容读取，删除失败不影响新保存。 */ }
     }
 
     /** 清除本次及本地覆盖，回到项目文件和默认值；不触发游戏重开或刷新网页。 */
@@ -79,21 +87,21 @@ export class ConfigTestSession<S extends ConfigSchema> {
         this.assertEnabled();
         this.store.replaceLayers({ 本地: {}, 会话: {} });
         const issues: string[] = [];
-        try { this.storage?.removeItem(this.storageKey); }
+        try { this.storage?.removeItem(this.storageKey); this.storage?.removeItem(this.legacyStorageKey); }
         catch { issues.push('本次覆盖已清除，但删除本地缓存失败，下次打开可能仍会读取旧值'); }
         if (this.url?.searchParams.has('qxValues'))
             issues.push('当前地址仍含链接覆盖；再次打开请移除 qxValues，或使用导出的新链接');
         return issues;
     }
 
-    /** 生成携带全部目标值的复现链接；不访问网络、不自动复制或跳转。 */
+    /** 生成携带相对项目基准改动的复现链接；不访问网络、不自动复制或跳转。 */
     shareURL(): string {
         this.assertEnabled();
         if (!this.url || ['http:', 'https:'].indexOf(this.url.protocol) === -1)
             throw new ConfigError(['复现链接需要通过 HTTP 或 HTTPS 打开的测试页面，请改用 JSON']);
         const result = new URL(this.url.href);
         result.searchParams.set('qxConfig', '1');
-        result.searchParams.set('qxValues', JSON.stringify(this.store.exportDocument()));
+        result.searchParams.set('qxValues', JSON.stringify(this.store.exportDocument('改动')));
         if (result.href.length > 8000) throw new ConfigError(['配置链接过长，请使用 JSON 文件复现']);
         return result.href;
     }
