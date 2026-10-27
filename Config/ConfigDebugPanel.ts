@@ -1,4 +1,4 @@
-import { ConfigExportScope, ConfigField, ConfigSchema, ConfigUpdateResult, ConfigValue } from './ConfigTypes';
+import { ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from './ConfigTypes';
 import { ConfigTestSession, message } from './ConfigTestSession';
 import { CONFIG_TEXT_LIMIT, configEqual } from './ConfigStore';
 
@@ -15,7 +15,7 @@ const UNGROUPED = '未分组';
  * 无需 Cocos 场景节点的 Web 测试面板，适用于编辑器浏览器预览和已打包的 Web 页面。
  * 原生或无 DOM 环境不创建面板，仍可使用核心及存储适配器。
  */
-export class ConfigDebugPanel<S extends ConfigSchema> {
+export class ConfigDebugPanel {
     private host: HTMLDivElement | null = null;
     private panel: HTMLDivElement | null = null;
     private rows: HTMLDivElement | null = null;
@@ -30,7 +30,7 @@ export class ConfigDebugPanel<S extends ConfigSchema> {
     private readonly handlers: { type: string; listener: EventListener }[] = [];
 
     /** 保留测试会话和输入协调回调；构造本身不创建 DOM 或监听。 */
-    constructor(private readonly session: ConfigTestSession<S>, private readonly options: ConfigPanelOptions = {}) {}
+    constructor(private readonly session: ConfigTestSession, private readonly options: ConfigPanelOptions = {}) {}
 
     /** 创建“参数”入口；关闭测试能力或没有 DOM 时返回 false，不影响游戏启动。 */
     mount(): boolean {
@@ -135,8 +135,8 @@ export class ConfigDebugPanel<S extends ConfigSchema> {
         if (!this.rows) return;
         this.rows.replaceChildren(); this.readers.clear();
         const snapshot = this.session.store.snapshot();
-        const desired = snapshot.desired as unknown as Record<string, ConfigValue>;
-        const active = snapshot.active as unknown as Record<string, ConfigValue>;
+        const desired = snapshot.desired;
+        const active = snapshot.active;
         const groups = new Map<string, HTMLDetailsElement>();
         for (const [key, field] of this.session.store.fields()) {
             const name = field.group || UNGROUPED;
@@ -228,7 +228,7 @@ export class ConfigDebugPanel<S extends ConfigSchema> {
 
     /** 只提交与当前目标值不同的字段，保留其余字段的来源；整批校验保证跨字段关系不出现短暂非法状态。 */
     private apply(): ConfigUpdateResult {
-        const desired = this.session.store.snapshot().desired as unknown as Record<string, ConfigValue>;
+        const desired = this.session.store.snapshot().desired;
         const changes: Record<string, ConfigValue> = Object.create(null);
         this.readers.forEach((read, key) => {
             const value = read();

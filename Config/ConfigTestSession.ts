@@ -1,5 +1,5 @@
 import { CONFIG_TEXT_LIMIT, ConfigStore } from './ConfigStore';
-import { ConfigError, ConfigSchema } from './ConfigTypes';
+import { ConfigError } from './ConfigTypes';
 
 /** 最小本地存储接口，可由浏览器存储、Cocos sys.localStorage 或测试替身实现。 */
 export interface ConfigStorage {
@@ -19,11 +19,9 @@ export interface ConfigTestOptions {
  * 测试配置的保存和分享适配器。没有网络请求，不读取任意远端 JSON，也不直接操作游戏。
  * 核心与此适配器均不依赖引擎；网页环境只在构造时按需访问，存储不可用时仍可本次调参。
  */
-export class ConfigTestSession<S extends ConfigSchema> {
+export class ConfigTestSession {
     readonly enabled: boolean;
     readonly storageKey: string;
-    /** 旧版本按配置版本隔离的缓存键，恢复时兼容读取，保存或清除时一并移除。 */
-    readonly legacyStorageKey: string;
     readonly panelRequested: boolean;
     private readonly storage: ConfigStorage | null;
     private readonly url: URL | null;
@@ -31,10 +29,9 @@ export class ConfigTestSession<S extends ConfigSchema> {
     private restored = false;
 
     /** 绑定一个项目容器，按项目隔离本地缓存；版本差异由文档版本号与迁移处理。 */
-    constructor(readonly store: ConfigStore<S>, options: ConfigTestOptions) {
+    constructor(readonly store: ConfigStore, options: ConfigTestOptions) {
         this.enabled = options.enabled;
         this.storageKey = 'qx-config:' + encodeURIComponent(store.project);
-        this.legacyStorageKey = this.storageKey + ':v' + store.version;
         this.storage = null;
         this.url = null;
         if (this.enabled) {
@@ -60,8 +57,7 @@ export class ConfigTestSession<S extends ConfigSchema> {
         this.restored = true;
         const issues = [...this.startupIssues];
         try {
-            let saved = this.storage?.getItem(this.storageKey);
-            if (saved === null || saved === undefined) saved = this.storage?.getItem(this.legacyStorageKey);
+            const saved = this.storage?.getItem(this.storageKey);
             if (saved !== null && saved !== undefined) issues.push(...this.store.importDocument(saved, '本地').map(text => '本地配置：' + text));
         } catch (error) { issues.push('本地配置未应用：' + message(error)); }
         try {
@@ -79,7 +75,6 @@ export class ConfigTestSession<S extends ConfigSchema> {
         if (text.length > CONFIG_TEXT_LIMIT) throw new ConfigError(['配置超过本地恢复的 64K 字符限制，请缩减配置']);
         try { this.storage.setItem(this.storageKey, text); }
         catch { throw new ConfigError(['本地保存失败，可能存储空间不足或访问被禁止，请导出 JSON']); }
-        try { this.storage.removeItem(this.legacyStorageKey); } catch { /* 旧缓存只是兼容读取，删除失败不影响新保存。 */ }
     }
 
     /** 清除本次及本地覆盖，回到项目文件和默认值；不触发游戏重开或刷新网页。 */
@@ -87,7 +82,7 @@ export class ConfigTestSession<S extends ConfigSchema> {
         this.assertEnabled();
         this.store.replaceLayers({ 本地: {}, 会话: {} });
         const issues: string[] = [];
-        try { this.storage?.removeItem(this.storageKey); this.storage?.removeItem(this.legacyStorageKey); }
+        try { this.storage?.removeItem(this.storageKey); }
         catch { issues.push('本次覆盖已清除，但删除本地缓存失败，下次打开可能仍会读取旧值'); }
         if (this.url?.searchParams.has('qxValues'))
             issues.push('当前地址仍含链接覆盖；再次打开请移除 qxValues，或使用导出的新链接');

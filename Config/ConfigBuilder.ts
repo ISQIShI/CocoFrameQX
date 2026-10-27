@@ -1,5 +1,4 @@
-import { booleanField, choiceField, ConfigDescription, ConfigField, ConfigTiming, ConfigValue, jsonField, NumberLimits, numberField, stringField,
-    vectorField } from './ConfigTypes';
+import { ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
 /**
  * 链式字段构建器基类：在声明阶段收集标题、说明与生效时机，由配置定义统一生成字段。
@@ -53,7 +52,7 @@ export class NumberBuilder extends LimitedBuilder<number> {
     /** 保存默认值。 */
     constructor(private readonly initial: number) { super(); }
     /** 生成数值字段。 */
-    protected create(info: ConfigDescription): ConfigField { return numberField(this.initial, { ...info, ...this.limits }); }
+    protected create(info: ConfigDescription): ConfigField { return { ...info, ...this.limits, kind: '数值', defaultValue: this.initial }; }
 }
 
 /** 开关字段构建器。 */
@@ -61,7 +60,7 @@ export class BooleanBuilder extends FieldBuilder<boolean> {
     /** 保存默认值。 */
     constructor(private readonly initial: boolean) { super(); }
     /** 生成开关字段。 */
-    protected create(info: ConfigDescription): ConfigField { return booleanField(this.initial, info); }
+    protected create(info: ConfigDescription): ConfigField { return { ...info, kind: '开关', defaultValue: this.initial }; }
 }
 
 /** 短文本字段构建器。 */
@@ -72,9 +71,7 @@ export class TextBuilder extends FieldBuilder<string> {
     /** 设置最大字符数。 */
     maxLength(value: number): this { this.limit = value; return this; }
     /** 生成文本字段。 */
-    protected create(info: ConfigDescription): ConfigField {
-        return stringField(this.initial, this.limit === undefined ? info : { ...info, maxLength: this.limit });
-    }
+    protected create(info: ConfigDescription): ConfigField { return { ...info, kind: '文本', defaultValue: this.initial, maxLength: this.limit }; }
 }
 
 /** 枚举选项字段构建器。 */
@@ -82,7 +79,7 @@ export class ChoiceBuilder<T extends string> extends FieldBuilder<T> {
     /** 保存默认值与可选项。 */
     constructor(private readonly initial: T, private readonly choices: readonly T[]) { super(); }
     /** 生成选项字段。 */
-    protected create(info: ConfigDescription): ConfigField { return choiceField(this.initial, this.choices, info); }
+    protected create(info: ConfigDescription): ConfigField { return { ...info, kind: '选项', defaultValue: this.initial, choices: this.choices }; }
 }
 
 /** 复杂数据字段构建器，校验函数必须覆盖业务依赖的结构与范围。 */
@@ -90,9 +87,7 @@ export class JsonBuilder<T extends ConfigValue> extends FieldBuilder<T> {
     /** 保存默认值与类型守卫。 */
     constructor(private readonly initial: T, private readonly accepts: (value: ConfigValue) => value is T) { super(); }
     /** 生成数据字段。 */
-    protected create(info: ConfigDescription): ConfigField {
-        return jsonField(this.initial, { ...info, accepts: this.accepts }) as unknown as ConfigField;
-    }
+    protected create(info: ConfigDescription): ConfigField { return { ...info, kind: '数据', defaultValue: this.initial, accepts: this.accepts }; }
 }
 
 /** 定长数字向量字段构建器，如位置、尺寸、颜色。 */
@@ -100,7 +95,9 @@ export class VectorBuilder extends LimitedBuilder<number[]> {
     /** 保存默认值与分量名称。 */
     constructor(private readonly initial: number[], private readonly components: readonly string[]) { super(); }
     /** 生成向量字段。 */
-    protected create(info: ConfigDescription): ConfigField { return vectorField(this.initial, this.components, { ...info, ...this.limits }); }
+    protected create(info: ConfigDescription): ConfigField {
+        return { ...info, ...this.limits, kind: '向量', defaultValue: this.initial, components: this.components };
+    }
 }
 
 /** 声明数值参数。 */

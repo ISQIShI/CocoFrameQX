@@ -2,11 +2,11 @@
 
 面向 PA 项目的快速实现和调试：程序在一处声明参数与约束，测试人员在 Web 测试包中修改、保存、导入导出和分享配置。无需后端服务，无需为调参重写游戏常量或每次重新打包。
 
-本模块独立于具体玩法，ConfigExample 只展示调用方式，不会自动接入或修改场景。各项目在业务目录声明自己的参数和组件绑定，示例数值不代表项目策划规则。
+本模块独立于具体玩法，不会自动接入或修改场景。各项目在业务目录声明自己的参数和组件绑定，下文示例数值不代表项目策划规则。
 
-兼容性：兼容 Creator 默认 ES2015 声明库及 isolatedModules；strict 开关开启或关闭都能编译。核心不依赖 `cc`，不创建全局单例。
+编译环境：Creator 默认 ES2015 声明库及 isolatedModules；strict 开关开启或关闭都能编译。除可选的 CocosConfigLoader 外不依赖 `cc`，不创建全局单例。
 
-2026-10-27 重构：新增链式字段构建器、嵌套定义与类型化读取视图、链式启动和组件绑定器；面板只提交改动并按分组折叠；保存与分享只携带改动，文档宽松导入并支持版本迁移；实时与重启参数组合非法时整体推迟到重启。旧的 `numberField` 等工厂与 `new ConfigStore` 用法继续有效。
+唯一接入方式：用链式构建器与 `defineConfig` 声明参数，用 `definition.setup(...)…start()` 启动，用 `definition.values` 读取。`ConfigStore` 是内部核心，由启动链创建。
 
 ## 1. 文件与职责
 
@@ -20,8 +20,7 @@
 | ConfigStore.ts | 默认值与分层覆盖、整批校验、只读快照、变更订阅、生效时机、文档导入导出 |
 | ConfigTestSession.ts | 测试开关、本地保存/恢复、URL 复现、缓存隔离 |
 | ConfigDebugPanel.ts | 独立 Web 面板，按分组生成控件、搜索、JSON 文件交互 |
-| CocosConfigLoader.ts | 可选的 JsonAsset / resources 项目配置加载 |
-| ConfigExample.ts | 可运行的声明和启动示例 |
+| CocosConfigLoader.ts | 可选：`loadConfigDocument` 从 resources 异步加载项目配置文档 |
 | index.ts | 核心及 Web 工具出口；引擎加载器使用独立导入 |
 
 ## 2. 最快接入：一处声明、一条链启动
@@ -119,13 +118,13 @@ GAME.setup('项目', 1).extend(scene)…start();
 ```
 
 - **保存到本机与复现链接只携带改动**：本地/会话层中相对“默认 + 项目层”真正不同的值。代码调整默认值后，未改动过该字段的测试者会自动用上新默认值。面板另有“导出全部”，用于生成完整的项目配置文件。
-- **导入默认宽松**：未知键（字段改名或删除）和单字段非法值逐项跳过并返回中文提示，其余值照常导入；跨字段规则仍整批校验，失败则整份不导入。`importDocument(doc, 层, { strict: true })` 保留严格行为。
+- **导入宽松**：未知键（字段改名或删除）和单字段非法值逐项跳过并返回中文提示，其余值照常导入；跨字段规则仍整批校验，失败则整份不导入。
 - **版本**：等于当前版本直接导入；低于当前版本先调用 `.migrate((values, fromVersion) => 新值)`，未提供迁移时按当前声明宽松导入并提示；高于当前版本或项目标识不符时拒绝。字段语义改变才需要递增 version，单纯增删字段不必递增。
-- 本地缓存键为 `qx-config:<项目>`，不再按版本隔离；恢复时兼容读取旧的 `:v<版本>` 键，下次保存或清除时移除。
+- 本地缓存键为 `qx-config:<项目>`，不按版本隔离；版本差异由文档中的 version 与迁移处理。
 
 ## 6. Cocos 项目配置文件
 
-项目层文件可作为 JsonAsset 在 Inspector 引用，把 `asset.json` 交给 `.projectDocument()`；或放到 `assets/resources/config/` 后用 `loadProjectConfig(store, 'config/玩法')` 加载（需在 `store.start()` 之前，适用于直接使用 ConfigStore 的写法）。Cocos 不会等待组件 start 中的 Promise，异步加载必须由唯一入口显式等待。不要在运行中重新加载项目资源来偷偷改变初始化参数。
+项目层文件可作为 JsonAsset 在 Inspector 引用，把 `asset.json` 交给 `.projectDocument()`；或放到 `assets/resources/config/` 后用 `const doc = await loadConfigDocument('config/玩法')` 加载，再 `.projectDocument(doc).start()`。Cocos 不会等待组件 start 中的 Promise，异步加载必须由唯一入口显式等待。不要在运行中重新加载项目资源来偷偷改变初始化参数。
 
 ## 7. 策划在测试包中的操作
 
@@ -149,7 +148,7 @@ GAME.setup('项目', 1).extend(scene)…start();
 
 | 操作 | API |
 | --- | --- |
-| 读取当前生效值 | `definition.values.组.键`，或 `store.get('组.键')` |
+| 读取当前生效值 | `definition.values.组.键`；扩展字段用 `runtime.store.get('键')` |
 | 查看目标、来源、待重启与本次变化 | `store.snapshot()` |
 | 合并少量覆盖 | `store.patchLayer('会话', { 'launch.minSpeed': 12 })`，返回 `{ changed, deferred }` |
 | 替换覆盖层，空对象撤销 | `store.replaceLayer('会话', {})` / `store.replaceLayers({ 本地: {}, 会话: {} })` |

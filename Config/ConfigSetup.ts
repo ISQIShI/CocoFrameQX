@@ -2,7 +2,7 @@ import type { ConfigDefinition, ConfigTree, ConfigTreeValues } from './ConfigDef
 import { ConfigDebugPanel } from './ConfigDebugPanel';
 import { ConfigSnapshot, ConfigStore } from './ConfigStore';
 import { ConfigStorage, ConfigTestSession } from './ConfigTestSession';
-import { ConfigError, ConfigMigration, ConfigSchema, ConfigValue } from './ConfigTypes';
+import { ConfigError, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
 
 /** 测试工具选项：开关由项目显式决定，存储与链接可注入。 */
 export interface ConfigTestToolOptions {
@@ -13,7 +13,7 @@ export interface ConfigTestToolOptions {
 }
 
 /** 容器读取接口，扩展只需按键读取生效值。 */
-export interface ConfigReader { get(key: string): unknown }
+export interface ConfigReader { get(key: string): ConfigValue }
 
 /** 启动扩展：补充扁平字段，在容器启动后应用生效值，退出时恢复原状。 */
 export interface ConfigExtension {
@@ -23,17 +23,14 @@ export interface ConfigExtension {
 }
 
 /** 跨字段校验：values 为定义的嵌套值，flat 含扩展字段在内的全部扁平值。 */
-export type ConfigValidator<T> = (values: ConfigTreeValues<T>, flat: Readonly<Record<string, ConfigValue>>) => readonly string[];
+export type ConfigValidator<T> = (values: ConfigTreeValues<T>, flat: ConfigRecord) => readonly string[];
 
-/** 启动完成后的配置运行实例，持有容器、测试会话与面板。 */
+/** 启动完成后的配置运行实例，持有容器、测试会话与面板；读取值通过 definition.values。 */
 export class ConfigRuntime<T extends ConfigTree> {
     private disposed = false;
     /** 由 ConfigSetup.start 创建。 */
-    constructor(readonly definition: ConfigDefinition<T>, readonly store: ConfigStore<ConfigSchema>,
-        readonly session: ConfigTestSession<ConfigSchema>, readonly panel: ConfigDebugPanel<ConfigSchema>,
-        readonly warnings: readonly string[], private readonly cleanup: () => void) {}
-    /** 类型化读取视图，等同 definition.values。 */
-    get values(): ConfigTreeValues<T> { return this.definition.values; }
+    constructor(readonly definition: ConfigDefinition<T>, readonly store: ConfigStore, readonly session: ConfigTestSession,
+        readonly panel: ConfigDebugPanel, readonly warnings: readonly string[], private readonly cleanup: () => void) {}
     /** 幂等释放：解除订阅、销毁面板、恢复扩展写入的原值并释放定义接入；不清除用户保存的测试数据。 */
     dispose(): void {
         if (this.disposed) return;
@@ -49,13 +46,13 @@ export class ConfigRuntime<T extends ConfigTree> {
 export class ConfigSetup<T extends ConfigTree> {
     private readonly extensions: ConfigExtension[] = [];
     private readonly validators: ConfigValidator<T>[] = [];
-    private readonly listeners: ((snapshot: ConfigSnapshot<ConfigSchema>) => void)[] = [];
+    private readonly listeners: ((snapshot: ConfigSnapshot) => void)[] = [];
     private migration: ConfigMigration | undefined;
     private projectInput: unknown = undefined;
     private tools: ConfigTestToolOptions = { enabled: false };
     private listenerError: ((error: unknown) => void) | undefined;
 
-    /** 通常由 definition.setup 创建。 */
+    /** 由 definition.setup 创建。 */
     constructor(readonly definition: ConfigDefinition<T>, readonly project: string, readonly version: number) {}
 
     /** 追加扩展字段及其应用逻辑；空值忽略，便于可选扩展直接传入。 */
@@ -69,7 +66,7 @@ export class ConfigSetup<T extends ConfigTree> {
     /** 设置测试工具开关、存储、链接和面板可见性回调。 */
     testTools(options: ConfigTestToolOptions): this { this.tools = { ...options }; return this; }
     /** 订阅启动后的配置变化，可多次调用。 */
-    onChange(listener: (snapshot: ConfigSnapshot<ConfigSchema>) => void): this { this.listeners.push(listener); return this; }
+    onChange(listener: (snapshot: ConfigSnapshot) => void): this { this.listeners.push(listener); return this; }
     /** 设置监听异常处理函数。 */
     onListenerError(handler: (error: unknown) => void): this { this.listenerError = handler; return this; }
 
@@ -83,11 +80,11 @@ export class ConfigSetup<T extends ConfigTree> {
             }
         }
         const validators = this.validators.slice(), definition = this.definition;
-        const store = new ConfigStore<ConfigSchema>({ project: this.project, version: this.version, schema,
+        const store = new ConfigStore({ project: this.project, version: this.version, schema,
             migrate: this.migration, onListenerError: this.listenerError,
-            validate: values => {
+            validate: flat => {
                 if (!validators.length) return [];
-                const flat = values as unknown as Readonly<Record<string, ConfigValue>>, nested = definition.read(flat);
+                const nested = definition.read(flat);
                 return validators.reduce<string[]>((issues, validator) => issues.concat(validator(nested, flat)), []);
             } });
         const warnings: string[] = [];

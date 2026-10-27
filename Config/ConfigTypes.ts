@@ -11,6 +11,9 @@ export type ConfigReadonlyValue = null | boolean | number | string | readonly Co
 export type ConfigReadonly<T> = ConfigValue extends T ? ConfigReadonlyValue
     : T extends object ? { readonly [K in keyof T]: ConfigReadonly<T[K]> } : T;
 
+/** 以扁平键索引的只读配置值。 */
+export type ConfigRecord = Readonly<Record<string, ConfigValue>>;
+
 /** 参数的生效时机；涉及初始场地、刚体结构等参数默认在重启后生效。 */
 export type ConfigTiming = '实时' | '重启';
 
@@ -31,10 +34,7 @@ export interface NumberLimits {
 }
 
 /** 数值参数声明；所有数值必须有限，可进一步限定范围与整数。 */
-export interface NumberField extends ConfigDescription, NumberLimits {
-    kind: '数值';
-    defaultValue: number;
-}
+export interface NumberField extends ConfigDescription, NumberLimits { kind: '数值'; defaultValue: number }
 
 /** 开关参数声明。 */
 export interface BooleanField extends ConfigDescription { kind: '开关'; defaultValue: boolean }
@@ -43,17 +43,13 @@ export interface BooleanField extends ConfigDescription { kind: '开关'; defaul
 export interface StringField extends ConfigDescription { kind: '文本'; defaultValue: string; maxLength?: number }
 
 /** 从有限字符串选项中选择的参数声明。 */
-export interface ChoiceField<T extends string = string> extends ConfigDescription {
-    kind: '选项';
-    defaultValue: T;
-    choices: readonly T[];
-}
+export interface ChoiceField extends ConfigDescription { kind: '选项'; defaultValue: string; choices: readonly string[] }
 
 /** 表格或复杂数据声明，业务必须显式提供形状校验函数。 */
-export interface JsonField<T extends ConfigValue = ConfigValue> extends ConfigDescription {
+export interface JsonField extends ConfigDescription {
     kind: '数据';
-    defaultValue: T;
-    accepts: (value: ConfigValue) => value is T;
+    defaultValue: ConfigValue;
+    accepts: (value: ConfigValue) => boolean;
 }
 
 /** 定长数字数组，如位置、尺寸、颜色；每个分量共用同一组数值约束。 */
@@ -70,39 +66,6 @@ export type ConfigField = NumberField | BooleanField | StringField | ChoiceField
 /** 使用稳定键组织配置，点号仅用于分组命名，不执行对象路径写入。 */
 export type ConfigSchema = Record<string, ConfigField>;
 
-/** 从字段声明推导业务读取类型。 */
-export type ConfigValues<S extends ConfigSchema> = { readonly [K in keyof S]: ConfigReadonly<S[K]['defaultValue']> };
-
-/** 创建数值参数；省略生效时机时采用重启生效。 */
-export function numberField(defaultValue: number, options: ConfigDescription & NumberLimits): NumberField {
-    return { ...options, kind: '数值', defaultValue };
-}
-
-/** 创建开关参数。 */
-export function booleanField(defaultValue: boolean, options: ConfigDescription): BooleanField {
-    return { ...options, kind: '开关', defaultValue };
-}
-
-/** 创建文本参数。 */
-export function stringField(defaultValue: string, options: ConfigDescription & { maxLength?: number }): StringField {
-    return { ...options, kind: '文本', defaultValue };
-}
-
-/** 创建枚举选项；选项字符串可以是中文业务值。 */
-export function choiceField<T extends string>(defaultValue: T, choices: readonly T[], options: ConfigDescription): ChoiceField<T> {
-    return { ...options, kind: '选项', defaultValue, choices };
-}
-
-/** 创建复杂 JSON 参数，校验必须覆盖业务依赖的数据结构和范围。 */
-export function jsonField<T extends ConfigValue>(defaultValue: T, options: ConfigDescription & { accepts: (value: ConfigValue) => value is T }): JsonField<T> {
-    return { ...options, kind: '数据', defaultValue };
-}
-
-/** 创建定长数字向量参数，默认值长度必须与分量数量一致。 */
-export function vectorField(defaultValue: number[], components: readonly string[], options: ConfigDescription & NumberLimits): VectorField {
-    return { ...options, kind: '向量', defaultValue, components };
-}
-
 /** 优先级从项目到本地再到会话递增；声明默认值始终作为兜底。 */
 export type ConfigLayer = '项目' | '本地' | '会话';
 
@@ -113,11 +76,6 @@ export type ConfigExportScope = '全部' | '改动';
 export interface ConfigUpdateResult {
     readonly changed: boolean;
     readonly deferred: boolean;
-}
-
-/** 文档导入选项；strict 为真时任何未知键、非法字段或版本不一致都拒绝整份文档。 */
-export interface ConfigImportOptions {
-    strict?: boolean;
 }
 
 /** 将旧版本文档的值迁移为当前版本；返回值仍需通过当前声明的校验。 */

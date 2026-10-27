@@ -1,6 +1,6 @@
+import type { FieldBuilder } from './ConfigBuilder';
 import type { ConfigExtension, ConfigReader } from './ConfigSetup';
-import { booleanField, ConfigError, ConfigField, ConfigSchema, ConfigTiming, ConfigValue, NumberLimits, numberField, stringField,
-    vectorField } from './ConfigTypes';
+import { ConfigDescription, ConfigError, ConfigField, ConfigSchema, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
 /** 绑定器默认选项；guard 返回假时跳过对该目标的写入，例如目标组件已被销毁。 */
 export interface ConfigBinderOptions {
@@ -53,7 +53,7 @@ export class ConfigBinder implements ConfigExtension {
 
     /** 写入容器中的生效值；只在业务初始化前调用，不读取待重启值。 */
     apply(store: ConfigReader): void {
-        for (const binding of this.bindings) this.write(binding, store.get(binding.key) as ConfigValue);
+        for (const binding of this.bindings) this.write(binding, store.get(binding.key));
     }
 
     /** 恢复登记时记录的原值。 */
@@ -77,9 +77,9 @@ export class ConfigBinderScope {
     value<T extends object, K extends keyof T & string>(target: T, property: K, label: string, options: ConfigBindOptions = {}): this {
         const current = target[property] as unknown, key = this.key(options.name || property), info = this.info(label, options);
         let field: ConfigField;
-        if (typeof current === 'number') field = numberField(current, { ...info, ...this.limits(options) });
-        else if (typeof current === 'boolean') field = booleanField(current, info);
-        else if (typeof current === 'string') field = stringField(current, { ...info, maxLength: options.maxLength ?? 200 });
+        if (typeof current === 'number') field = { ...info, ...this.limits(options), kind: '数值', defaultValue: current };
+        else if (typeof current === 'boolean') field = { ...info, kind: '开关', defaultValue: current };
+        else if (typeof current === 'string') field = { ...info, kind: '文本', defaultValue: current, maxLength: options.maxLength ?? 200 };
         else throw new ConfigError(['绑定属性必须是数值、开关或文本：' + key]);
         this.binder.register(key, field, target, value => { target[property] = value as unknown as T[K]; });
         return this;
@@ -95,7 +95,7 @@ export class ConfigBinderScope {
         if (!current || typeof current !== 'object') throw new ConfigError(['绑定向量属性必须是对象：' + key]);
         const initial = components.map(component => current[component]);
         if (initial.some(value => typeof value !== 'number' || !Number.isFinite(value))) throw new ConfigError(['绑定向量分量必须是有限数值：' + key]);
-        this.binder.register(key, vectorField(initial as number[], components, { ...this.info(label, options), ...this.limits(options) }), target, value => {
+        this.binder.register(key, this.vectorField(initial as number[], components, label, options), target, value => {
             const latest = target[property] as unknown as { clone?: () => Record<string, unknown> } & Record<string, unknown>;
             const copy = typeof latest.clone === 'function' ? latest.clone() : { ...latest };
             components.forEach((component, i) => { copy[component] = (value as number[])[i]; });
@@ -107,25 +107,29 @@ export class ConfigBinderScope {
     /** 绑定节点本地位置，通过 setPosition 写入以触发引擎变换更新。 */
     position(node: PositionTarget, label: string, options: ConfigBindOptions = {}): this {
         const key = this.key(options.name || 'position'), p = node.position;
-        this.binder.register(key, vectorField([p.x, p.y, p.z], ['x', 'y', 'z'], { ...this.info(label, options), ...this.limits(options) }), node,
+        this.binder.register(key, this.vectorField([p.x, p.y, p.z], ['x', 'y', 'z'], label, options), node,
             value => { const [x, y, z] = value as number[]; node.setPosition(x, y, z); });
         return this;
     }
 
-    /** 登记自定义字段与写入函数，字段归入当前分组。 */
-    custom(name: string, field: ConfigField, target: object, write: (value: ConfigValue) => void): this {
-        this.binder.register(this.key(name), { ...field, group: this.group }, target, write);
+    /** 用链式构建器登记自定义字段与写入函数，字段归入当前分组；默认值即恢复时写回的原值。 */
+    custom(name: string, field: FieldBuilder<ConfigValue>, target: object, write: (value: ConfigValue) => void): this {
+        this.binder.register(this.key(name), field.build(name, this.group), target, write);
         return this;
     }
 
     /** 拼接稳定键。 */
     private key(name: string): string { return this.prefix + '.' + name; }
 
+    /** 生成向量字段声明。 */
+    private vectorField(initial: number[], components: readonly string[], label: string, options: ConfigBindOptions): ConfigField {
+        return { ...this.info(label, options), ...this.limits(options), kind: '向量', defaultValue: initial, components };
+    }
+
     /** 合成标题、分组、生效时机与说明，单项选项优先于绑定器默认值。 */
-    private info(label: string, options: ConfigBindOptions) {
+    private info(label: string, options: ConfigBindOptions): ConfigDescription {
         const defaults = this.binder.options;
-        return { label, group: this.group, timing: options.timing ?? defaults.timing ?? '重启' as ConfigTiming,
-            description: options.description ?? defaults.description };
+        return { label, group: this.group, timing: options.timing ?? defaults.timing ?? '重启', description: options.description ?? defaults.description };
     }
 
     /** 只取数值约束字段。 */
