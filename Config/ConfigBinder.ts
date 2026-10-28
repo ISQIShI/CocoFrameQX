@@ -28,7 +28,7 @@ interface Binding { key: string; target: object; initial: ConfigValue; write: (v
 
 /**
  * 把现有组件或数据对象的属性登记为配置字段：默认值取自对象当前值，
- * 启动后写入生效值，退出时恢复原值；不保存场景或资源。
+ * 启动后写入生效值，实时字段变化时重新写入，退出时恢复原值；不保存场景或资源。
  */
 export class ConfigBinder implements ConfigExtension {
     readonly schema: ConfigSchema = Object.create(null);
@@ -54,6 +54,11 @@ export class ConfigBinder implements ConfigExtension {
     /** 写入容器中的生效值；只在业务初始化前调用，不读取待重启值。 */
     apply(store: ConfigReader): void {
         for (const binding of this.bindings) this.write(binding, store.get(binding.key));
+    }
+
+    /** 只重写本次生效值变化的绑定；启动后仅实时字段的生效值会变化。 */
+    update(store: ConfigReader, changed: readonly string[]): void {
+        for (const binding of this.bindings) if (changed.indexOf(binding.key) !== -1) this.write(binding, store.get(binding.key));
     }
 
     /** 恢复登记时记录的原值。 */

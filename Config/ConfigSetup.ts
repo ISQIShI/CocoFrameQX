@@ -15,10 +15,12 @@ export interface ConfigTestToolOptions {
 /** 容器读取接口，扩展只需按键读取生效值。 */
 export interface ConfigReader { get(key: string): ConfigValue }
 
-/** 启动扩展：补充扁平字段，在容器启动后应用生效值，退出时恢复原状。 */
+/** 启动扩展：补充扁平字段，在容器启动后应用生效值，实时字段变化时按变化键更新，退出时恢复原状。 */
 export interface ConfigExtension {
     readonly schema: ConfigSchema;
     apply(store: ConfigReader): void;
+    /** 启动后生效值变化时调用，先于 onChange 监听；changed 为本次生效值变化的全部键。 */
+    update?(store: ConfigReader, changed: readonly string[]): void;
     restore(): void;
 }
 
@@ -100,7 +102,9 @@ export class ConfigSetup<T extends ConfigTree> {
             release(); throw error;
         }
         const panel = new ConfigDebugPanel(session, { onVisibilityChange: this.tools.onPanelVisibilityChange });
-        const unsubscribers = this.listeners.map(listener => store.subscribe(listener));
+        const unsubscribers = applied.filter(extension => extension.update)
+            .map(extension => store.subscribe(snapshot => { if (snapshot.changed.length) extension.update!(store, snapshot.changed); }))
+            .concat(this.listeners.map(listener => store.subscribe(listener)));
         return new ConfigRuntime(definition, store, session, panel, Object.freeze(warnings), () => {
             unsubscribers.forEach(unsubscribe => unsubscribe()); panel.dispose();
             for (const extension of applied.slice().reverse()) extension.restore();

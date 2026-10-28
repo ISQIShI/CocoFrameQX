@@ -90,7 +90,7 @@ GAME.setup('项目', 1).extend(scene)…start();
 
 - `value` 自动识别数值、开关、文本；`vector` 复制当前对象（优先 `clone()`）后整体赋值，触发引擎属性 setter；`position` 通过 `setPosition(x, y, z)` 写入；`custom` 登记任意字段与写入函数。
 - `guard` 返回假时跳过写入，用于已销毁的组件。绑定默认“重启”生效：只在启动时写一次，不在运行中搬动物体。
-- 自定义扩展只需实现 `{ schema, apply(store), restore() }`。
+- 自定义扩展只需实现 `{ schema, apply(store), restore() }`；可选 `update(store, changed)` 在启动后生效值变化时调用（先于 `onChange`）。`ConfigBinder` 借此在实时绑定字段变化时只重写变化项。
 
 ## 4. 优先级与生效时机
 
@@ -170,6 +170,6 @@ node tools/coco-frame-qx/config.test.cjs
 node tools/coco-frame-qx/config-panel.test.cjs <Playwright模块绝对路径> <浏览器可执行文件绝对路径>
 ```
 
-第一条包含严格类型检查（含嵌套定义推导和错误键的编译期断言）与 28 项核心、构建器、链式启动、绑定器、存储和加载器检查；第二条用独立无头浏览器和内存网页验证 6 组面板行为。
+第一条包含严格类型检查（含嵌套定义推导和错误键的编译期断言）与 29 项核心、构建器、链式启动、绑定器、存储和加载器检查；第二条用独立无头浏览器和内存网页验证 6 组面板行为。
 
 2026-10-27 交付验证：严格及项目实际非严格类型检查无诊断；28 项核心检查与 6 组无头 Edge 面板检查通过；AnimalMerge 已迁移到本系统并通过其 63 项逻辑及 3 组面板检查。未运行真实 Cocos Preview、实际打包产物或原生包。
