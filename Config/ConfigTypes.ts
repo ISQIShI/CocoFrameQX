@@ -69,8 +69,11 @@ export type ConfigSchema = Record<string, ConfigField>;
 /** 优先级从项目到本地再到会话递增；声明默认值始终作为兜底。 */
 export type ConfigLayer = '项目' | '本地' | '会话';
 
-/** 导出范围：“全部”为完整目标值；“改动”只含本地/会话层相对默认与项目层的差异。 */
-export type ConfigExportScope = '全部' | '改动';
+/**
+ * 导出范围：“改动”只含本地/会话层相对“默认 + 项目层”的差异，用于本地保存、复现链接与叠加在项目配置上分享；
+ * “非默认”含全部层中不同于声明默认值的目标值，可直接作为新的项目配置文件；“全部”为每个字段的完整目标值。
+ */
+export type ConfigExportScope = '改动' | '非默认' | '全部';
 
 /** 一次层更新的结果；deferred 表示改动合法但只能整体推迟到重启生效。 */
 export interface ConfigUpdateResult {

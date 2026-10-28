@@ -26,6 +26,13 @@ type PanelView = GroupPage | { kind: 'changed' };
 /** 目录中的一个页面：分组本身或混合分组的本级参数。 */
 type GroupPage = { kind: 'node' | 'own'; node: GroupNode };
 
+/** 导出范围选项：标题、说明与下载文件名后缀。 */
+const EXPORT_SCOPES: readonly { scope: ConfigExportScope; title: string; note: string; file: string }[] = [
+    { scope: '改动', title: '本次改动', note: '只含相对项目配置的本地与本次修改，叠加在项目配置上使用；用于分享与复现', file: '测试改动' },
+    { scope: '非默认', title: '项目配置', note: '项目配置与本次修改中所有不同于代码默认值的参数，可直接替换项目配置文件', file: '项目配置' },
+    { scope: '全部', title: '全部参数', note: '每个参数的当前目标值，包括与默认值相同的参数', file: '全部参数' },
+];
+
 /** 未声明分组的字段在面板中的归类名称。 */
 const UNGROUPED = '未分组';
 /** 滑块只用于跨度适中的有界数值，避免大范围整数无法精确拖动。 */
@@ -116,6 +123,11 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.复原.隐藏{visibility:hidden}' +
     '.空{padding:32px 0;text-align:center;color:var(--弱)}' +
     '.交换 p{margin:0 0 12px;color:var(--次);font-size:12px;line-height:1.6}.交换 textarea{width:100%;min-height:220px}' +
+    '.范围{margin:0 0 12px;padding:4px 0;border:1px solid var(--线);border-radius:10px;background:var(--面)}' +
+    '.范围 legend{padding:0 6px;margin-left:8px;font-size:12px;font-weight:600;color:var(--次)}' +
+    '.范围 label{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;align-items:start;padding:8px 12px;cursor:pointer;border-top:1px solid var(--线)}' +
+    '.范围 legend+label{border-top:none}.范围 label:hover{background:var(--浮)}.范围 input{margin:2px 0 0;accent-color:var(--主)}' +
+    '.范围 b{display:block;font-weight:600}.范围 span span{display:block;font-size:11.5px;color:var(--弱);line-height:1.5}' +
     '.按钮组{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:8px;margin:12px 0}' +
     '.文件{display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--面);border:1px solid var(--线强);border-radius:7px;padding:6px 12px}' +
     '.文件:hover{background:var(--浮)}.文件 input{display:none}' +
@@ -184,6 +196,7 @@ export class ConfigDebugPanel {
     private root: GroupNode = { name: '', title: '', parent: null, children: [], rows: [], all: [], section: null };
     private view: PanelView = { kind: 'node', node: this.root };
     private exchangeOpen = false;
+    private exportScope: ConfigExportScope = '改动';
     private resetTimer: ReturnType<typeof setTimeout> | null = null;
     private unsubscribe: (() => void) | null = null;
     private visible = false;
@@ -495,8 +508,18 @@ export class ConfigDebugPanel {
     private buildExchange(): HTMLDivElement {
         const page = this.element('div', '交换');
         const note = document.createElement('p');
-        note.textContent = '粘贴或选择配置 JSON 后导入到本次会话；导出、下载与复现链接会先应用未提交的改动。“改动”只含相对项目参数的差异。';
+        note.textContent = '粘贴或选择配置 JSON 后导入到本次会话。导出、下载与复现链接会先应用未提交的改动；复现链接与保存到本机始终只含本次改动。';
         page.appendChild(note);
+        const scopes = document.createElement('fieldset'); scopes.className = '范围';
+        const legend = document.createElement('legend'); legend.textContent = '导出范围'; scopes.appendChild(legend);
+        for (const option of EXPORT_SCOPES) {
+            const item = document.createElement('label'), radio = document.createElement('input'), text = this.element('span');
+            radio.type = 'radio'; radio.name = 'qx-export-scope'; radio.value = option.scope; radio.checked = option.scope === this.exportScope;
+            radio.addEventListener('change', () => { if (radio.checked) this.exportScope = option.scope; });
+            const title = document.createElement('b'), detail = this.element('span'); title.textContent = option.title; detail.textContent = option.note;
+            text.append(title, detail); item.append(radio, text); scopes.appendChild(item);
+        }
+        page.appendChild(scopes);
         this.text = document.createElement('textarea'); this.text.maxLength = CONFIG_TEXT_LIMIT;
         this.text.placeholder = '在此粘贴配置 JSON；导出的 JSON 或复现链接也显示在此';
         this.text.setAttribute('aria-label', '配置导入导出内容'); page.appendChild(this.text);
@@ -507,8 +530,7 @@ export class ConfigDebugPanel {
         upload.setAttribute('aria-label', '选择配置 JSON 文件');
         upload.addEventListener('change', () => this.readFile(upload));
         file.appendChild(upload); group.appendChild(file);
-        group.appendChild(this.button('导出改动', () => this.run(() => this.exportText('改动'))));
-        group.appendChild(this.button('导出全部', () => this.run(() => this.exportText('全部'))));
+        group.appendChild(this.button('导出到文本框', () => this.run(() => this.exportText(this.exportScope))));
         group.appendChild(this.button('下载 JSON', () => this.run(() => { this.apply(); this.download(); })));
         group.appendChild(this.button('生成复现链接', () => this.run(() => {
             this.apply(); this.text!.value = this.session.shareURL(); this.report('链接已生成，只携带相对项目参数的改动；打开后按目标值启动');
@@ -810,7 +832,8 @@ export class ConfigDebugPanel {
     /** 先应用面板输入，再把指定范围的配置写入文本框。 */
     private exportText(scope: ConfigExportScope): void {
         this.apply(); this.text!.value = this.session.store.exportJSON(scope);
-        this.report(scope === '改动' ? '已导出相对项目参数的改动，可复制或下载' : '已导出完整目标值，可作为项目配置文件');
+        const option = EXPORT_SCOPES.find(item => item.scope === scope)!, count = Object.keys(this.session.store.exportDocument(scope).values).length;
+        this.report('已导出“' + option.title + '”，共 ' + count + ' 项：' + option.note);
     }
 
     /** 复制文本框内容；剪贴板不可用时选中文本，提示手动复制。 */
@@ -858,16 +881,17 @@ export class ConfigDebugPanel {
         const node = document.createElement(tag); node.className = className; return node;
     }
 
-    /** 下载相对项目参数的改动，并及时释放临时对象地址。 */
+    /** 按所选导出范围下载 JSON，并及时释放临时对象地址。 */
     private download(): void {
-        const blob = new Blob([this.session.store.exportJSON('改动')], { type: 'application/json;charset=utf-8' });
+        const option = EXPORT_SCOPES.find(item => item.scope === this.exportScope)!;
+        const blob = new Blob([this.session.store.exportJSON(option.scope)], { type: 'application/json;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement('a'); anchor.href = url;
-        anchor.download = this.session.store.project.replace(/[^a-zA-Z0-9_一-鿿-]/g, '_') + '-测试配置.json';
+        anchor.download = this.session.store.project.replace(/[^a-zA-Z0-9_一-鿿-]/g, '_') + '-' + option.file + '.json';
         // 下载产生的合成点击也必须留在面板事件边界内，避免传给游戏的全局点击监听。
         this.panel!.appendChild(anchor); anchor.click(); anchor.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
-        this.report('已发起改动 JSON 下载；若环境限制下载，可用导出改动复制文本');
+        this.report('已发起“' + option.title + '” JSON 下载；若环境限制下载，可导出到文本框后复制');
     }
 
     /** 在面板内显示失败，保留现有游戏和上一份有效参数。 */

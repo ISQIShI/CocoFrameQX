@@ -270,8 +270,9 @@ export class ConfigStore {
     }
 
     /**
-     * 导出目标值以供复现。“全部”为完整目标值；“改动”只含本地/会话层中
-     * 相对“默认 + 项目层”基准真正不同的值，保存后代码调整默认值仍能生效。
+     * 导出目标值。“改动”只含本地/会话层中相对“默认 + 项目层”基准真正不同的值，叠加在项目配置上使用，
+     * 项目配置与代码默认值后续调整仍能生效；“非默认”含项目层在内所有不同于声明默认值的目标值，
+     * 用于生成或合并项目配置文件；“全部”为完整目标值。
      */
     exportDocument(scope: ConfigExportScope = '全部'): ConfigDocument {
         const desired = this.state.desired;
@@ -283,6 +284,10 @@ export class ConfigStore {
                 if ((has(this.layers.本地, key) || has(this.layers.会话, key)) && !configEqual(desired[key], baseline[key]))
                     changes[key] = desired[key];
             }
+            values = changes;
+        } else if (scope === '非默认') {
+            const changes: Record<string, ConfigValue> = Object.create(null);
+            for (const key of Object.keys(this.schema)) if (!configEqual(desired[key], this.schema[key].defaultValue)) changes[key] = desired[key];
             values = changes;
         }
         return { format: 1, project: this.project, version: this.version, values: copyValue(values) as Record<string, ConfigValue> };
