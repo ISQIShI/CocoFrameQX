@@ -89,7 +89,7 @@ export class ServiceLocator implements ServiceResolver {
         if (!(token instanceof ServiceToken) || typeof factory !== 'function') throw new ServiceError('registration', '需要类型令牌和显式工厂');
         if (this.bindings.has(token)) throw new ServiceError('registration', '重复注册：' + token.description);
         const lifetime = options.lifetime ?? 'singleton';
-        if (!['singleton', 'scoped', 'transient'].includes(lifetime)) throw new ServiceError('registration', '未知生命周期');
+        if (['singleton', 'scoped', 'transient'].indexOf(lifetime) < 0) throw new ServiceError('registration', '未知生命周期');
         this.bindings.set(token, { token, owner: this, factory, options: { ...options }, lifetime, async, isValue });
         return this;
     }

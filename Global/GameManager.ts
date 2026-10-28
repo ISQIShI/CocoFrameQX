@@ -1,12 +1,11 @@
-import { _decorator, AudioSource, Component, Input, input, ResolutionPolicy, screen, view } from 'cc';
+import { _decorator, AudioClip, Component, Input, input, ResolutionPolicy, screen, view } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 import { AudioManager } from '../Other/AudioManager';
+import { CocosAudioRuntime } from '../Other/CocosAudioRuntime';
 import { PlayableSDK } from '../SDK/PlayableSDK';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
 
-const { ccclass, disallowMultiple } = _decorator;
-
-declare var window;
+const { ccclass, disallowMultiple, property } = _decorator;
 
 export interface IPausable {
     pause(value: boolean): void;
@@ -31,51 +30,39 @@ export class GameManager extends ComponentSingletonBase {
         return this._isPaused;
     }
 
-    private _audioSource: AudioSource = null!;
+    /** 通用入口只装配音频，不再隐式播放名为 bgm 的资源。 */
+    @property({ tooltip: '可选背景音乐：resources 内完整路径；留空由玩法管理音乐' })
+    backgroundMusic = '';
+    private audioRuntime: CocosAudioRuntime | null = null;
+    private unbindPlatformAudio: (() => void) | null = null;
+    /** 业务通过依赖注入共享此实例，各自创建作用域。 */
+    get audio(): AudioManager<AudioClip> | null {
+        return this.audioRuntime && !this.audioRuntime.isDisposed ? this.audioRuntime.manager : null;
+    }
 
     protected onLoad(): void {
-        this._audioSource = this.getComponent(AudioSource)!;
-        // assert(audioSource);
-        // director.addPersistRootNode(this.node);
-
         PlayableSDK.adapter();
         PlayableSDK.gameReady();
-
-        // init AudioManager
-        AudioManager.init(this._audioSource, this.node);
-
-        let enableAudio = () => {
-            console.log('AudioManager.resume');
-            AudioManager.firstClick = true;
-            AudioManager.resume();
-
-            document.removeEventListener('mouseup', enableAudio, true);
-            document.removeEventListener('touchend', enableAudio, true);
-        }
-
-        document.addEventListener('mouseup', enableAudio, true);
-        document.addEventListener('touchend', enableAudio, true);
+        this.audioRuntime = new CocosAudioRuntime(this.node, {
+            onError: (error, context) => console.warn('[GameManager audio] ' + context, error),
+        });
+        this.unbindPlatformAudio = PlayableSDK.bindAudio(this.audioRuntime.manager);
+        this.audioRuntime.addCleanup(this.unbindPlatformAudio);
+        this.audioRuntime.manager.setSuspended('game-manager:disabled', !this.enabledInHierarchy);
+        input.on(Input.EventType.TOUCH_END, this.onInteracted, this);
+        input.on(Input.EventType.MOUSE_UP, this.onInteracted, this);
+        input.on(Input.EventType.KEY_UP, this.onInteracted, this);
     }
 
     protected start() {
         // 系统监听屏幕变化
-        AudioManager.musicPlay("bgm", true);
+        if (this.backgroundMusic) this.audio?.createScope('game-manager-music')
+            .play(this.backgroundMusic, { bus: 'music', loop: true, priority: 100 });
 
         view.on("canvas-resize", this.resize, this);
         this.scheduleOnce(this.resize);
 
-        PlayableSDK.onInteracted();
-
-        // if (window.setLoadingProgress) {
-        //     window.setLoadingProgress(100);
-        // }
         PlayableSDK.hideLoadingBar();
-
-
-        // PhysicsSystem.instance.debugDrawFlags = EPhysicsDrawFlags.WIRE_FRAME;
-        // PhysicsSystem.instance.debugDrawFlags =
-        //     EPhysicsDrawFlags.WIRE_FRAME |
-        //     EPhysicsDrawFlags.AABB;
     }
 
     private _gameIsEnd: boolean = false;
@@ -85,7 +72,7 @@ export class GameManager extends ComponentSingletonBase {
         if (!this._gameIsEnd) {
             this._gameIsEnd = true;
             this.pauseGame(true);
-            AudioManager.musicStop();
+            this.disposeAudio();
             this._gameEndEvent.invoke();
             input.on(Input.EventType.TOUCH_START, this.gameEnd, this);
         }
@@ -96,6 +83,7 @@ export class GameManager extends ComponentSingletonBase {
     public pauseGame(value: boolean) {
         if (this._isPaused === value) return;
         this._isPaused = value;
+        this.audio?.setSuspended('game-manager:paused', value);
 
         let index = 0;
         while (index < this._pausableObjectArr.length) {
@@ -124,7 +112,36 @@ export class GameManager extends ComponentSingletonBase {
         }
     }
 
-    public resize(e?) {
+    private onInteracted(): void {
+        this.audioRuntime?.unlock();
+        PlayableSDK.onInteracted();
+        this.removeInteractionListeners();
+    }
+
+    private removeInteractionListeners(): void {
+        input.off(Input.EventType.TOUCH_END, this.onInteracted, this);
+        input.off(Input.EventType.MOUSE_UP, this.onInteracted, this);
+        input.off(Input.EventType.KEY_UP, this.onInteracted, this);
+    }
+
+    private disposeAudio(): void {
+        this.removeInteractionListeners();
+        this.unbindPlatformAudio?.(); this.unbindPlatformAudio = null;
+        this.audioRuntime?.dispose(); this.audioRuntime = null;
+    }
+
+    protected onDisable(): void { this.audio?.setSuspended('game-manager:disabled', true); }
+    protected onEnable(): void { this.audio?.setSuspended('game-manager:disabled', false); }
+
+    protected onDestroy(): void {
+        this.disposeAudio();
+        view.off('canvas-resize', this.resize, this);
+        input.off(Input.EventType.TOUCH_START, this.gameEnd, this);
+        this.unschedule(this.resize);
+        this._pausableObjectArr.length = 0;
+    }
+
+    public resize() {
         if (screen.windowSize.height > screen.windowSize.width && screen.windowSize.width / screen.windowSize.height < 1) {
             view.setResolutionPolicy(ResolutionPolicy.FIXED_WIDTH);
         }
