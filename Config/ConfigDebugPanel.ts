@@ -22,7 +22,9 @@ interface FieldRow {
 }
 
 /** 当前页面：分组目录或末级参数页（node）、混合分组的本级参数（own）、全部改动（changed）。 */
-type PanelView = { kind: 'node' | 'own'; node: GroupNode } | { kind: 'changed' };
+type PanelView = GroupPage | { kind: 'changed' };
+/** 目录中的一个页面：分组本身或混合分组的本级参数。 */
+type GroupPage = { kind: 'node' | 'own'; node: GroupNode };
 
 /** 未声明分组的字段在面板中的归类名称。 */
 const UNGROUPED = '未分组';
@@ -408,19 +410,44 @@ export class ConfigDebugPanel {
         if (resetScroll) { this.directory!.scrollTop = 0; this.list!.scrollTop = 0; }
     }
 
-    /** 末级分组页显示同级的上一组与下一组，便于在结构相同的分组间切换。 */
+    /** 某分组目录中列出的页面，顺序与目录一致：混合分组的“本级参数”在前，其后为各下级。 */
+    private entriesOf(parent: GroupNode): GroupPage[] {
+        const pages: GroupPage[] = parent.rows.length && parent.children.length ? [{ kind: 'own', node: parent }] : [];
+        return pages.concat(parent.children.map((node): GroupPage => ({ kind: 'node', node })));
+    }
+
+    /** 当前页面在其上层分组目录中的同级页面；顶级分组、首页与“已修改”没有上层分组，返回空。 */
+    private peers(): { list: GroupPage[]; index: number } | null {
+        const view = this.view;
+        if (view.kind === 'changed') return null;
+        if (view.kind === 'own') return { list: this.entriesOf(view.node), index: 0 };
+        // 被自动跳过的单一中间层不出现在目录中，以它在上层目录中的位置为准。
+        let anchor = view.node, parent = anchor.parent;
+        while (parent && parent !== this.root && parent.children.length === 1 && !parent.rows.length) { anchor = parent; parent = parent.parent; }
+        if (!parent || parent === this.root) return null;
+        const list = this.entriesOf(parent);
+        return { list, index: list.findIndex(item => item.kind === 'node' && item.node === anchor) };
+    }
+
+    /** 打开同级页面：本级参数直接打开，分组按目录规则进入。 */
+    private go(page: GroupPage): void {
+        if (page.kind === 'own') { this.view = { kind: 'own', node: page.node }; this.clearSearch(); this.render(true); }
+        else this.enter(page.node);
+    }
+
+    /** 有上层分组的页面（含中间级目录与本级参数）显示同级的上一组与下一组，顺序与上层目录一致。 */
     private renderSiblings(allowed: boolean): void {
-        const view = this.view, bar = this.siblings!;
-        const node = view.kind === 'node' && !view.node.children.length ? view.node : null;
-        const peers = node?.parent ? node.parent.children : [];
-        bar.hidden = this.exchangeOpen || !allowed || !node || peers.length < 2;
-        if (bar.hidden || !node) { bar.replaceChildren(); return; }
-        const index = peers.indexOf(node), prev = peers[index - 1], next = peers[index + 1];
-        const before = this.button('‹ ' + (prev ? prev.name : '无'), () => prev && this.enter(prev)), after = this.button((next ? next.name : '无') + ' ›', () => next && this.enter(next), '后');
+        const bar = this.siblings!, peers = allowed && !this.exchangeOpen ? this.peers() : null;
+        bar.hidden = !peers || peers.list.length < 2;
+        if (!peers || bar.hidden) { bar.replaceChildren(); return; }
+        const { list, index } = peers, prev = list[index - 1], next = list[index + 1];
+        const label = (page: GroupPage) => page.kind === 'own' ? '本级参数' : page.node.name;
+        const before = this.button('‹ ' + (prev ? label(prev) : '无'), () => prev && this.go(prev));
+        const after = this.button((next ? label(next) : '无') + ' ›', () => next && this.go(next), '后');
         before.disabled = !prev; after.disabled = !next;
-        before.setAttribute('aria-label', prev ? '上一组：' + prev.name : '没有上一组');
-        after.setAttribute('aria-label', next ? '下一组：' + next.name : '没有下一组');
-        const position = this.element('span'); position.textContent = (index + 1) + ' / ' + peers.length;
+        before.setAttribute('aria-label', prev ? '上一组：' + label(prev) : '没有上一组');
+        after.setAttribute('aria-label', next ? '下一组：' + label(next) : '没有下一组');
+        const position = this.element('span'); position.textContent = (index + 1) + ' / ' + list.length;
         bar.replaceChildren(before, position, after);
     }
 
