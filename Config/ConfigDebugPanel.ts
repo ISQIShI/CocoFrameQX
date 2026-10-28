@@ -416,7 +416,7 @@ export class ConfigDebugPanel {
         return pages.concat(parent.children.map((node): GroupPage => ({ kind: 'node', node })));
     }
 
-    /** 当前页面在其上层分组目录中的同级页面；顶级分组、首页与“已修改”没有上层分组，返回空。 */
+    /** 当前页面在其上层目录（含首页）中的同级页面；首页与“已修改”汇总页不参与，返回空。 */
     private peers(): { list: GroupPage[]; index: number } | null {
         const view = this.view;
         if (view.kind === 'changed') return null;
@@ -424,7 +424,7 @@ export class ConfigDebugPanel {
         // 被自动跳过的单一中间层不出现在目录中，以它在上层目录中的位置为准。
         let anchor = view.node, parent = anchor.parent;
         while (parent && parent !== this.root && parent.children.length === 1 && !parent.rows.length) { anchor = parent; parent = parent.parent; }
-        if (!parent || parent === this.root) return null;
+        if (!parent) return null;
         const list = this.entriesOf(parent);
         return { list, index: list.findIndex(item => item.kind === 'node' && item.node === anchor) };
     }
@@ -435,7 +435,7 @@ export class ConfigDebugPanel {
         else this.enter(page.node);
     }
 
-    /** 有上层分组的页面（含中间级目录与本级参数）显示同级的上一组与下一组，顺序与上层目录一致。 */
+    /** 除首页与“已修改”外的所有分组页面（顶级、中间级、末级与本级参数）显示同级的上一组与下一组，顺序与上层目录一致。 */
     private renderSiblings(allowed: boolean): void {
         const bar = this.siblings!, peers = allowed && !this.exchangeOpen ? this.peers() : null;
         bar.hidden = !peers || peers.list.length < 2;
