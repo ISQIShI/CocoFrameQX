@@ -22,65 +22,118 @@ const CHANGED = '已修改';
 /** 滑块只用于跨度适中的有界数值，避免大范围整数无法精确拖动。 */
 const SLIDER_SPAN = 1000;
 
+/**
+ * 检查器式深色界面：中性色偏向主色的蓝灰，行之间以细线分隔而非卡片；
+ * 语义色只表达状态（实时、重启、错误），主色只用于选中、未应用与主要操作。
+ */
 const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!important}' +
-    '.根{--底:#111922;--面:#18222d;--面2:#223040;--线:#2d3d4f;--字:#e6edf3;--弱:#93a7ba;--主:#4ea1ff;--主深:#1d64c0;' +
-    '--实时:#3fbf87;--重启:#e3a83b;--错:#ff6b6b;font:13px/1.45 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:var(--字);color-scheme:dark}' +
+    '.根{--底:#0e141b;--面:#141c25;--浮:#1b2531;--井:#0a0f15;--线:#243140;--线强:#33455a;--字:#dbe4ec;--次:#a3b2c0;--弱:#73859a;' +
+    '--主:#6aa6ff;--主底:rgba(106,166,255,.12);--主实:#2f6fd6;--实时:#4fc48f;--重启:#e2a945;--错:#f06a6a;--错底:rgba(240,106,106,.1);' +
+    '--等宽:ui-monospace,"Cascadia Mono",Consolas,"SF Mono",monospace;' +
+    'font:13px/1.5 system-ui,-apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--字);color-scheme:dark}' +
     'button,input,select,textarea{font:inherit;color:inherit}' +
-    'button{cursor:pointer;background:var(--面2);border:1px solid var(--线);border-radius:6px;padding:6px 10px;white-space:nowrap}' +
-    'button:hover:not(:disabled){border-color:#4d6884}button:disabled{opacity:.45;cursor:default}' +
-    'button.主{background:var(--主深);border-color:var(--主);color:#fff}button.确认{background:#7a2a2a;border-color:var(--错);color:#fff}' +
+    'button{cursor:pointer;background:transparent;border:1px solid var(--线强);border-radius:6px;padding:6px 12px;white-space:nowrap;transition:background .12s,border-color .12s}' +
+    'button:hover:not(:disabled){background:var(--浮);border-color:#47607a}button:disabled{opacity:.4;cursor:default}' +
+    'button.主{background:var(--主实);border-color:var(--主实);color:#fff;font-weight:600}button.主:hover:not(:disabled){background:#3a7ce6;border-color:#3a7ce6}' +
+    'button.确认{background:var(--错);border-color:var(--错);color:#14090a;font-weight:600}' +
     ':focus-visible{outline:2px solid var(--主);outline-offset:1px}' +
-    'input,select,textarea{background:#0b121a;border:1px solid var(--线);border-radius:6px;padding:5px 8px;min-width:0}' +
-    'input:focus,select:focus,textarea:focus{border-color:var(--主);outline:none}' +
-    '.入口{position:fixed;top:8px;right:8px;display:flex;align-items:center;gap:6px;border-radius:999px;padding:6px 14px;' +
-    'background:rgba(17,25,34,.9);border-color:#4d6884;box-shadow:0 2px 10px rgba(0,0,0,.4)}' +
-    '.徽标{background:var(--重启);color:#111;border-radius:999px;padding:0 6px;font-size:11px;font-weight:700}' +
-    '.面板{position:fixed;top:0;right:0;width:min(460px,100vw);height:100vh;height:100dvh;display:flex;flex-direction:column;' +
-    'background:var(--底);border-left:1px solid var(--线);box-shadow:-10px 0 28px rgba(0,0,0,.5);outline:none;' +
-    'visibility:hidden;transform:translateX(100%);transition:transform .16s ease,visibility 0s linear .16s}' +
-    '.面板.打开{visibility:visible;transform:none;transition:transform .16s ease}' +
-    '.头部{display:flex;align-items:center;gap:6px;padding:12px 12px 8px}' +
-    '.头部 h2{flex:1;min-width:0;margin:0;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
-    '.项目{font-size:12px;font-weight:400;color:var(--弱)}.图标{padding:4px 10px}' +
-    '.搜索{margin:0 12px 8px}' +
-    '.标签{display:flex;gap:4px;overflow-x:auto;padding:0 12px 8px;border-bottom:1px solid var(--线);flex:none;scrollbar-width:thin}' +
-    '.标签 button{flex:none;border-radius:999px;padding:3px 10px;background:transparent;color:var(--弱)}' +
-    '.标签 button[aria-selected=true]{background:var(--面2);color:var(--字);border-color:var(--主)}' +
-    '.标签 button.有改动::after{content:"";display:inline-block;width:6px;height:6px;margin-left:5px;border-radius:50%;background:var(--主);vertical-align:middle}' +
-    '.标签.搜索中 button{opacity:.55}.数{margin-left:4px;font-size:11px;opacity:.7}' +
-    '.列表,.交换{flex:1;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;padding:0 12px 12px}' +
-    '.子组>h3{position:sticky;top:0;z-index:1;margin:0 -12px;padding:10px 12px 4px;font-size:12px;font-weight:600;color:var(--弱);background:var(--底)}' +
-    '.参数{display:grid;grid-template-columns:minmax(0,1fr) minmax(130px,48%);gap:4px 10px;align-items:center;margin:3px 0;' +
-    'padding:7px 8px 7px 9px;border-radius:6px;border-left:3px solid transparent;background:var(--面)}' +
-    '.参数.宽 .控件{grid-column:1/-1}.参数.已改{border-left-color:var(--主);background:#1a2a3c}.参数.非法{border-left-color:var(--错)}' +
-    '.名称{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0}.名称 .文字{font-weight:500;overflow-wrap:anywhere}' +
-    '.标记{display:inline-flex;flex-wrap:wrap;gap:4px}.标记 span{font-size:11px;line-height:16px;padding:0 5px;border-radius:4px;border:1px solid var(--线);color:var(--弱)}' +
-    '.标记 .实时{color:var(--实时);border-color:rgba(63,191,135,.45)}.标记 .重启{color:var(--重启);border-color:rgba(227,168,59,.45)}' +
-    '.标记 .待重启{color:#111;background:var(--重启);border-color:var(--重启)}.标记 .未应用{color:#fff;background:var(--主深);border-color:var(--主)}' +
-    '.复原{flex:none;padding:2px 4px;border:none;background:none;color:var(--弱);font-size:14px;line-height:1}.复原.隐藏{visibility:hidden}' +
-    '.说明{grid-column:1/-1;font-size:11.5px;color:var(--弱);overflow-wrap:anywhere}.键{font-family:ui-monospace,Consolas,monospace}' +
-    '.控件{display:flex;align-items:center;gap:6px;min-width:0}.控件 input[type=number]{width:100%}' +
-    '.控件 input[type=range]{flex:1 1 auto;min-width:50px;padding:0;accent-color:var(--主)}.控件 input[type=range]+input{flex:0 0 76px}' +
+    'input,select,textarea{background:var(--井);border:1px solid var(--线);border-radius:5px;padding:5px 8px;min-width:0}' +
+    'input:hover,select:hover,textarea:hover{border-color:var(--线强)}input:focus,select:focus,textarea:focus{border-color:var(--主);outline:none;box-shadow:0 0 0 3px var(--主底)}' +
+    'input[type=number]{font-family:var(--等宽);font-variant-numeric:tabular-nums;text-align:right}' +
+    '.入口{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:calc(10px + env(safe-area-inset-right,0px));display:flex;align-items:center;gap:7px;' +
+    'padding:7px 14px 7px 11px;border-radius:999px;background:rgba(14,20,27,.88);border-color:var(--线强);font-weight:600;box-shadow:0 4px 14px rgba(0,0,0,.35);backdrop-filter:blur(6px)}' +
+    '.入口 svg{width:16px;height:16px;flex:none;color:var(--主)}' +
+    '.徽标{min-width:18px;padding:0 5px;border-radius:999px;background:var(--重启);color:#1a1205;font-size:11px;line-height:18px;text-align:center;font-weight:700}' +
+    '.面板{position:fixed;top:0;right:0;width:min(480px,100vw);height:100vh;height:100dvh;display:flex;flex-direction:column;' +
+    'background:var(--底);border-left:1px solid var(--线);box-shadow:-16px 0 40px rgba(0,0,0,.45);outline:none;' +
+    'visibility:hidden;transform:translateX(100%);transition:transform .18s ease,visibility 0s linear .18s}' +
+    '.面板.打开{visibility:visible;transform:none;transition:transform .18s ease}' +
+    '.头部{display:flex;align-items:center;gap:8px;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 10px 16px}' +
+    '.头部 h2{flex:1;min-width:0;margin:0;font-size:15px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}' +
+    '.项目{margin-left:2px;font-size:12px;font-weight:400;color:var(--弱)}' +
+    '.图标{width:32px;height:32px;padding:0;border-color:transparent;font-size:15px;color:var(--次)}' +
+    '.搜索{margin:0 16px 10px;padding:7px 10px}' +
+    '.标签{display:flex;gap:2px;overflow-x:auto;padding:0 10px;border-bottom:1px solid var(--线);flex:none;scrollbar-width:none;overscroll-behavior-x:contain}' +
+    '.标签::-webkit-scrollbar{display:none}' +
+    '.标签 button{flex:none;position:relative;border:none;border-radius:0;padding:8px 8px 9px;color:var(--弱);background:none}' +
+    '.标签 button:hover:not(:disabled){background:none;color:var(--字)}' +
+    '.标签 button[aria-selected=true]{color:var(--字)}' +
+    '.标签 button[aria-selected=true]::before{content:"";position:absolute;left:8px;right:8px;bottom:-1px;height:2px;border-radius:2px;background:var(--主)}' +
+    '.标签 button.有改动::after{content:"";position:absolute;top:7px;right:2px;width:5px;height:5px;border-radius:50%;background:var(--主)}' +
+    '.标签.搜索中 button{opacity:.5}.数{margin-left:4px;font-size:11px;color:var(--弱);font-variant-numeric:tabular-nums}' +
+    '.列表,.交换{flex:1;overflow:auto;overscroll-behavior:contain;touch-action:pan-y;padding:0 16px 16px}' +
+    '.子组>h3{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;margin:0 -16px;padding:12px 16px 6px;' +
+    'font-size:12px;font-weight:600;color:var(--次);background:var(--底);border-bottom:1px solid var(--线)}' +
+    '.子组>h3 span{font-weight:400;color:var(--弱);font-variant-numeric:tabular-nums}' +
+    '.参数{display:grid;grid-template-columns:minmax(0,1fr) minmax(150px,50%);gap:6px 12px;align-items:center;margin:0 -8px;padding:10px 8px;' +
+    'border-bottom:1px solid var(--线);border-radius:4px}' +
+    '.参数:hover{background:rgba(255,255,255,.015)}.参数.宽 .控件{grid-column:1/-1}' +
+    '.参数.已改{background:var(--主底)}.参数.非法{background:var(--错底)}.参数.非法 input,.参数.非法 textarea{border-color:var(--错)}' +
+    '.名称{display:flex;flex-wrap:wrap;align-items:center;gap:4px 6px;min-width:0}' +
+    '.名称 .文字{font-weight:500;overflow-wrap:anywhere}' +
+    '.参数.已改 .文字::before,.参数.非法 .文字::before{content:"";display:inline-block;width:6px;height:6px;margin-right:6px;border-radius:50%;background:var(--主);vertical-align:2px}' +
+    '.参数.非法 .文字::before{background:var(--错)}' +
+    '.标记{display:inline-flex;flex-wrap:wrap;gap:4px}' +
+    '.标记 span{font-size:11px;line-height:17px;padding:0 6px;border-radius:999px;color:var(--次);background:var(--浮)}' +
+    '.标记 .实时{color:var(--实时);background:rgba(79,196,143,.12)}.标记 .重启{color:var(--重启);background:rgba(226,169,69,.12)}' +
+    '.标记 .待重启{color:#1a1205;background:var(--重启);font-weight:600}.标记 .未应用{color:var(--主);background:var(--主底)}' +
+    '.标记 .输入有误{color:var(--错);background:var(--错底)}' +
+    '.详情{grid-column:1/-1;display:flex;flex-direction:column;gap:3px;min-width:0}' +
+    '.描述{margin:0;font-size:12px;line-height:1.55;color:var(--次);overflow-wrap:anywhere}' +
+    '.元{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px;font-size:11.5px;color:var(--弱)}' +
+    '.元 .项{display:inline-flex;gap:5px;align-items:baseline;white-space:nowrap}.元 .项 b{font-weight:400;color:var(--弱)}' +
+    '.元 .值{font-family:var(--等宽);font-variant-numeric:tabular-nums;color:var(--次)}' +
+    '.元 .键{padding:0 5px;border:none;border-radius:4px;background:var(--浮);font-family:var(--等宽);font-size:11px;color:var(--次);white-space:normal;overflow-wrap:anywhere;text-align:left}' +
+    '.元 .键:hover:not(:disabled){background:var(--线);color:var(--字)}.元 .运行 .值{color:var(--重启)}' +
+    '.控件{display:flex;align-items:center;gap:8px;min-width:0}.控件 input[type=number]{width:100%}' +
+    '.控件 input[type=range]{flex:1 1 auto;min-width:56px;height:18px;padding:0;margin:0;background:none;border:none;box-shadow:none;accent-color:var(--主)}' +
+    '.控件 input[type=range]+input{flex:0 0 78px}' +
     '.控件 select,.控件 input[type=text],.控件 textarea{width:100%}' +
-    'textarea{min-height:84px;resize:vertical;font-family:ui-monospace,Consolas,monospace;font-size:12px}' +
-    '.分量项{flex:1 1 0;display:flex;align-items:center;gap:3px;min-width:0}.分量项 span{font-size:11px;color:var(--弱)}' +
-    '.色块{flex:none;width:24px;height:24px;border-radius:5px;border:1px solid var(--线)}' +
-    'input[type=checkbox].开关{appearance:none;-webkit-appearance:none;position:relative;width:38px;height:22px;margin:0;padding:0;' +
-    'border:none;border-radius:999px;background:#3a4b5d;cursor:pointer;transition:background .12s}' +
-    'input[type=checkbox].开关::before{content:"";position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:transform .12s}' +
-    'input[type=checkbox].开关:checked{background:var(--主深)}input[type=checkbox].开关:checked::before{transform:translateX(16px)}' +
-    '.空{padding:24px 0;text-align:center;color:var(--弱)}' +
-    '.交换 p{margin:4px 0 10px;color:var(--弱);font-size:12px}.交换 textarea{width:100%;min-height:200px}' +
-    '.按钮组{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:6px;margin:10px 0}' +
-    '.文件{display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--面2);border:1px solid var(--线);border-radius:6px;padding:6px 10px}' +
-    '.文件 input{display:none}' +
-    '.底部{flex:none;padding:8px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--线);background:var(--面)}' +
-    '.状态{margin-bottom:8px;max-height:5.6em;overflow:auto;white-space:pre-wrap;font-size:12px;color:#ffe2a1}' +
-    '.操作{display:grid;grid-template-columns:auto 1fr auto auto;gap:6px}' +
-    '@media (max-width:600px){.面板{top:auto;bottom:0;left:0;width:100%;height:80vh;height:80dvh;border-left:0;' +
-    'border-top:1px solid var(--线);border-radius:12px 12px 0 0;box-shadow:0 -10px 28px rgba(0,0,0,.5);transform:translateY(100%)}' +
-    '.参数{grid-template-columns:minmax(0,1fr) minmax(120px,52%)}.操作{grid-template-columns:repeat(3,1fr)}.操作 .应用{grid-column:1/-1;order:-1}}' +
-    '@media (prefers-reduced-motion:reduce){.面板,.面板.打开{transition:none}}';
+    'textarea{min-height:84px;resize:vertical;font-family:var(--等宽);font-size:12px}' +
+    '.分量项{flex:1 1 0;display:flex;align-items:center;gap:4px;min-width:0}.分量项 span{font:11px var(--等宽);color:var(--弱);text-transform:uppercase}' +
+    '.色块{flex:none;width:26px;height:26px;border-radius:5px;border:1px solid var(--线强);background-image:linear-gradient(45deg,#333 25%,transparent 25%,transparent 75%,#333 75%),linear-gradient(45deg,#333 25%,transparent 25%,transparent 75%,#333 75%);background-size:8px 8px;background-position:0 0,4px 4px}' +
+    '.色块 i{display:block;width:100%;height:100%;border-radius:4px}' +
+    'input[type=checkbox].开关{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:36px;height:20px;margin:0;padding:0;' +
+    'border:none;border-radius:999px;background:var(--线强);cursor:pointer;transition:background .12s}' +
+    'input[type=checkbox].开关::before{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:#e9eef3;transition:transform .12s}' +
+    'input[type=checkbox].开关:checked{background:var(--主实)}input[type=checkbox].开关:checked::before{transform:translateX(16px)}' +
+    '.复原{flex:none;width:24px;height:24px;padding:0;border:none;color:var(--弱);font-size:14px;line-height:1}.复原:hover:not(:disabled){color:var(--字)}' +
+    '.复原.隐藏{visibility:hidden}' +
+    '.空{padding:32px 0;text-align:center;color:var(--弱)}' +
+    '.交换 p{margin:12px 0;color:var(--次);font-size:12px;line-height:1.6}.交换 textarea{width:100%;min-height:220px}' +
+    '.按钮组{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:8px;margin:12px 0}' +
+    '.文件{display:flex;align-items:center;justify-content:center;cursor:pointer;border:1px solid var(--线强);border-radius:6px;padding:6px 12px}' +
+    '.文件:hover{background:var(--浮)}.文件 input{display:none}' +
+    '.底部{flex:none;padding:10px 16px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--线);background:var(--面)}' +
+    '.状态{margin-bottom:10px;max-height:5.6em;overflow:auto;white-space:pre-wrap;font-size:12px;line-height:1.5;color:var(--次)}' +
+    '.操作{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px}' +
+    '@media (max-width:600px){.面板{top:auto;bottom:0;left:0;width:100%;height:82vh;height:82dvh;border-left:0;' +
+    'border-top:1px solid var(--线);border-radius:14px 14px 0 0;box-shadow:0 -16px 40px rgba(0,0,0,.45);transform:translateY(100%)}' +
+    '.头部{padding-top:12px}.参数{grid-template-columns:minmax(0,1fr) minmax(130px,54%)}' +
+    '.操作{grid-template-columns:repeat(3,1fr)}.操作 .应用{grid-column:1/-1;order:-1}}' +
+    '@media (prefers-reduced-motion:reduce){.面板,.面板.打开,button,input[type=checkbox].开关,input[type=checkbox].开关::before{transition:none}}';
+
+/** 元信息中的取值文字：数组用逗号分隔，开关用开/关，过长截断。 */
+function formatValue(value: ConfigValue): string {
+    const text = Array.isArray(value) ? value.map(item => JSON.stringify(item)).join(', ')
+        : typeof value === 'boolean' ? (value ? '开' : '关') : typeof value === 'string' ? (value ? '“' + value + '”' : '空') : JSON.stringify(value);
+    return text.length > 60 ? text.slice(0, 59) + '…' : text;
+}
+
+/** 入口按钮的调节滑杆图标，内联 SVG，颜色跟随文字色。 */
+function slidersIcon(): SVGSVGElement {
+    const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
+    svg.setAttribute('viewBox', '0 0 16 16'); svg.setAttribute('aria-hidden', 'true');
+    for (const [y, x] of [[4, 10], [8, 5], [12, 11]]) {
+        const line = document.createElementNS(ns, 'path');
+        line.setAttribute('d', 'M2 ' + y + 'H14'); line.setAttribute('stroke', 'currentColor'); line.setAttribute('stroke-width', '1.5');
+        line.setAttribute('stroke-linecap', 'round'); line.setAttribute('opacity', '.55');
+        const knob = document.createElementNS(ns, 'circle');
+        knob.setAttribute('cx', String(x)); knob.setAttribute('cy', String(y)); knob.setAttribute('r', '2.2'); knob.setAttribute('fill', 'currentColor');
+        svg.append(line, knob);
+    }
+    return svg;
+}
 
 /**
  * 无需 Cocos 场景节点的 Web 测试面板，适用于编辑器浏览器预览和已打包的 Web 页面。
@@ -127,7 +180,8 @@ export class ConfigDebugPanel {
         const style = document.createElement('style'); style.textContent = STYLE; root.appendChild(style);
         const shell = this.element('div', '根'); root.appendChild(shell);
 
-        this.entry = this.button('参数', () => this.setVisible(true), '入口');
+        this.entry = this.button('测试参数', () => this.setVisible(true), '入口');
+        this.entry.prepend(slidersIcon());
         this.entry.setAttribute('aria-label', '打开测试参数'); this.entry.setAttribute('aria-expanded', 'false');
         this.badge = this.element('span', '徽标'); this.badge.hidden = true; this.entry.appendChild(this.badge);
         shell.appendChild(this.entry);
@@ -147,8 +201,14 @@ export class ConfigDebugPanel {
         this.search = document.createElement('input'); this.search.type = 'search'; this.search.className = '搜索';
         this.search.placeholder = '搜索标题、分组或参数键'; this.search.setAttribute('aria-label', '搜索参数');
         this.search.addEventListener('input', () => this.filter()); panel.appendChild(this.search);
-        this.tabBar = this.element('div', '标签'); this.tabBar.setAttribute('role', 'tablist'); this.tabBar.setAttribute('aria-label', '参数分组');
-        panel.appendChild(this.tabBar);
+        const tabBar = this.tabBar = this.element('div', '标签'); tabBar.setAttribute('role', 'tablist'); tabBar.setAttribute('aria-label', '参数分组');
+        // 竖向滚轮转为横向滚动；已到尽头时不拦截，交还给列表。
+        tabBar.addEventListener('wheel', event => {
+            const delta = Math.abs(event.deltaY) > Math.abs(event.deltaX) ? event.deltaY : 0, max = tabBar.scrollWidth - tabBar.clientWidth;
+            if (!delta || max <= 0 || (delta < 0 && tabBar.scrollLeft <= 0) || (delta > 0 && tabBar.scrollLeft >= max - 1)) return;
+            event.preventDefault(); tabBar.scrollLeft += delta;
+        }, { passive: false });
+        panel.appendChild(tabBar);
         this.list = this.element('div', '列表'); panel.appendChild(this.list);
         this.empty = this.element('div', '空'); this.empty.textContent = '没有匹配的参数'; this.empty.hidden = true;
         this.exchange = this.buildExchange(); this.exchange.hidden = true; panel.appendChild(this.exchange);
@@ -206,15 +266,18 @@ export class ConfigDebugPanel {
 
     /** 按声明一次创建全部行；分组路径第一段作为标签，完整路径作为子分组标题。 */
     private buildRows(): void {
-        const sections = new Map<string, HTMLDivElement>(), counts = new Map<string, number>();
+        const sections = new Map<string, { element: HTMLDivElement; count: HTMLSpanElement; size: number }>(), counts = new Map<string, number>();
         for (const [key, field] of this.session.store.fields()) {
             const group = field.group || UNGROUPED, tab = group.split('·')[0];
-            let section = sections.get(group);
-            if (!section) {
-                section = this.element('div', '子组');
-                const heading = document.createElement('h3'); heading.textContent = group.split('·').join(' · ');
-                section.appendChild(heading); sections.set(group, section); this.list!.appendChild(section);
+            let entry = sections.get(group);
+            if (!entry) {
+                const element = this.element('div', '子组'), heading = document.createElement('h3'), count = this.element('span');
+                heading.textContent = group.split('·').join(' · '); heading.appendChild(count);
+                element.appendChild(heading); this.list!.appendChild(element);
+                entry = { element, count, size: 0 }; sections.set(group, entry);
             }
+            entry.count.textContent = ++entry.size + ' 项';
+            const section = entry.element;
             counts.set(tab, (counts.get(tab) || 0) + 1);
             const name = (field.group ? field.group + ' / ' : '') + field.label;
             const element = this.element('div', '参数'); element.dataset.key = key;
@@ -226,8 +289,10 @@ export class ConfigDebugPanel {
             restore.setAttribute('aria-label', '恢复默认：' + name); restore.title = '恢复声明默认值（需应用）';
             head.append(label, marks);
             const control = this.control(field, name); control.element.classList.add('控件'); control.element.appendChild(restore);
-            const note = this.element('div', '说明');
-            element.append(head, control.element, note); section.appendChild(element);
+            const details = this.element('div', '详情'), note = this.element('div', '元');
+            if (field.description) { const text = document.createElement('p'); text.className = '描述'; text.textContent = field.description; details.appendChild(text); }
+            details.appendChild(note);
+            element.append(head, control.element, details); section.appendChild(element);
             const row: FieldRow = { key, field, tab, search: [key, field.label, group].join(' ').toLowerCase(),
                 element, control, marks, note, restore, section, dirty: false, invalid: false };
             restore.addEventListener('click', () => { control.write(field.defaultValue); this.touch(row); });
@@ -327,8 +392,8 @@ export class ConfigDebugPanel {
             }
             case '向量': {
                 const box = this.element('div');
-                const swatch = field.components.join() === 'r,g,b,a' ? this.element('span', '色块') : null;
-                if (swatch) box.appendChild(swatch);
+                const color = field.components.join() === 'r,g,b,a', swatch = color ? document.createElement('i') : null;
+                if (swatch) { const frame = this.element('span', '色块'); frame.appendChild(swatch); box.appendChild(frame); }
                 const inputs = field.components.map(component => {
                     const item = document.createElement('label'); item.className = '分量项';
                     const tag = this.element('span'); tag.textContent = component;
@@ -418,14 +483,33 @@ export class ConfigDebugPanel {
         const marks: [string, string][] = [[field.timing || '重启', field.timing === '实时' ? '实时' : '重启']];
         if (source !== '默认') marks.push([source, '来源']);
         if (pending) marks.push(['待重启', '待重启']);
-        if (row.dirty) marks.push([row.invalid ? '输入有误' : '未应用', '未应用']);
+        if (row.dirty) marks.push(row.invalid ? ['输入有误', '输入有误'] : ['未应用', '未应用']);
         row.marks.replaceChildren(...marks.map(([text, className]) => { const tag = this.element('span', className); tag.textContent = text; return tag; }));
         row.restore.classList.toggle('隐藏', !row.dirty && configEqual(snapshot.desired[key], field.defaultValue));
-        const keyText = this.element('span', '键'); keyText.textContent = key;
-        const limits = field.kind === '数值' || field.kind === '向量';
-        const parts = [limits && (field.min !== undefined || field.max !== undefined) ? '范围 ' + (field.min ?? '不限') + ' ～ ' + (field.max ?? '不限') : '',
-            field.description || '', pending ? '当前仍为 ' + JSON.stringify(snapshot.active[key]).slice(0, 160) : ''].filter(Boolean);
-        row.note.replaceChildren(keyText, document.createTextNode(parts.length ? ' · ' + parts.join(' · ') : ''));
+        const keyButton = this.button(key, () => this.copyKey(key), '键'); keyButton.title = '点击复制参数键';
+        const items: HTMLElement[] = [keyButton];
+        const limits = field.kind === '数值' || field.kind === '向量' ? field : null;
+        if (limits && (limits.min !== undefined || limits.max !== undefined))
+            items.push(this.metaItem('范围', (limits.min ?? '−∞') + ' – ' + (limits.max ?? '∞')));
+        if (limits?.step !== undefined) items.push(this.metaItem('步长', String(limits.step)));
+        else if (limits?.integer) items.push(this.metaItem('取值', '整数'));
+        if (field.kind === '文本' && field.maxLength !== undefined) items.push(this.metaItem('最长', field.maxLength + ' 字'));
+        if (field.kind !== '数据') items.push(this.metaItem('默认', formatValue(field.defaultValue)));
+        if (pending) items.push(this.metaItem('本局仍为', formatValue(snapshot.active[key]), '运行'));
+        row.note.replaceChildren(...items);
+    }
+
+    /** 生成一个“标签 + 值”的元信息项。 */
+    private metaItem(label: string, value: string, className = ''): HTMLSpanElement {
+        const item = this.element('span', '项 ' + className), name = document.createElement('b'), text = this.element('span', '值');
+        name.textContent = label; text.textContent = value; item.append(name, text); return item;
+    }
+
+    /** 复制参数键，便于在 JSON 或代码中定位；剪贴板不可用时只提示键名。 */
+    private copyKey(key: string): void {
+        const done = () => this.report('已复制参数键 ' + key), fail = () => this.report('参数键：' + key + '（当前环境不允许写入剪贴板）');
+        try { if (navigator.clipboard) navigator.clipboard.writeText(key).then(done, fail); else fail(); }
+        catch { fail(); }
     }
 
     /** 刷新标签计数、标签改动点、应用按钮与入口徽标。 */
