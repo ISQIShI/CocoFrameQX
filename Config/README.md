@@ -19,7 +19,7 @@
 | ConfigBinder.ts | 把现有组件属性登记为配置字段，启动时写入、退出时恢复 |
 | ConfigStore.ts | 默认值与分层覆盖、整批校验、只读快照、变更订阅、生效时机、文档导入导出 |
 | ConfigTestSession.ts | 测试开关、本地保存/恢复、URL 复现、缓存隔离 |
-| ConfigDebugPanel.ts | 独立 Web 面板：宽屏右侧抽屉、窄屏底部面板，分组标签、搜索、统一应用，导入导出独立页 |
+| ConfigDebugPanel.ts | 独立 Web 面板：浅色主题，宽屏右侧抽屉、窄屏底部面板，按分组逐级进入、搜索、统一应用，导入导出独立页 |
 | CocosConfigLoader.ts | 可选：`loadConfigDocument` 从 resources 异步加载项目配置文档 |
 | index.ts | 核心及 Web 工具出口；引擎加载器使用独立导入 |
 
@@ -142,6 +142,7 @@ GAME.setup('项目', 1).extend(scene)…start();
 - 由项目显式传入 `testTools({ enabled })`。关闭后不读取测试缓存或 URL，不创建面板，不提供保存、清除和分享操作；项目配置照常使用。
 - 测试工具不请求远端配置，配置字符串仅作为数据解析。
 - 核心适用于 Web、原生及纯逻辑测试。Web 面板依赖 DOM、Shadow DOM 和文件下载能力；原生/无 DOM 环境不会创建它。可将 `sys.localStorage` 通过 `storage` 传入。
+- 关闭测试工具时的发布开销：运行时只构造两个空闲对象（测试会话不读存储与链接，面板 `mount` 直接返回 false），不创建 DOM、样式或监听；但 `ConfigSetup` 静态引用面板，面板代码（未压缩约 35 KB，主要是样式字符串与控件逻辑）仍会进入包体。需要剔除时，可改为由项目注入面板工厂或动态加载，目前未做。
 - 面板内的触摸、鼠标和键盘事件停止冒泡。若项目在 window/document 捕获阶段监听输入，必须用 `onPanelVisibilityChange` 协调输入暂停。
 
 ## 9. 常用 API
