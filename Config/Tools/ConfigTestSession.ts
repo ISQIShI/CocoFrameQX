@@ -1,5 +1,5 @@
-import { CONFIG_TEXT_LIMIT, ConfigStore } from './ConfigStore';
-import { ConfigError } from './ConfigTypes';
+import { CONFIG_TEXT_LIMIT, ConfigStore } from '../ConfigStore';
+import { ConfigError } from '../ConfigTypes';
 
 /** 最小本地存储接口，可由浏览器存储、Cocos sys.localStorage 或测试替身实现。 */
 export interface ConfigStorage {
@@ -8,19 +8,18 @@ export interface ConfigStorage {
     removeItem(key: string): void;
 }
 
-/** 调试能力必须由项目显式开启；链接参数不能把关闭的发布配置重新打开。 */
+/** 存储与链接可注入；缺省时读取浏览器的 localStorage 与当前地址。 */
 export interface ConfigTestOptions {
-    enabled: boolean;
     storage?: ConfigStorage | null;
     url?: string;
 }
 
 /**
- * 测试配置的保存和分享适配器。没有网络请求，不读取任意远端 JSON，也不直接操作游戏。
- * 核心与此适配器均不依赖引擎；网页环境只在构造时按需访问，存储不可用时仍可本次调参。
+ * 测试配置的保存和分享适配器，建立在配置核心之上，核心不依赖它。没有网络请求，不读取任意远端 JSON，也不直接操作游戏。
+ * 创建即启用：正式版本由项目不创建它（或不接入 ConfigTestTools），本地缓存与链接便不会被读取。
+ * 不依赖引擎；网页环境只在构造时按需访问，存储不可用时仍可本次调参。
  */
 export class ConfigTestSession {
-    readonly enabled: boolean;
     readonly storageKey: string;
     readonly panelRequested: boolean;
     private readonly storage: ConfigStorage | null;
@@ -29,21 +28,18 @@ export class ConfigTestSession {
     private restored = false;
 
     /** 绑定一个项目容器，按项目隔离本地缓存；版本差异由文档版本号与迁移处理。 */
-    constructor(readonly store: ConfigStore, options: ConfigTestOptions) {
-        this.enabled = options.enabled;
+    constructor(readonly store: ConfigStore, options: ConfigTestOptions = {}) {
         this.storageKey = 'qx-config:' + encodeURIComponent(store.project);
-        this.storage = null;
-        this.url = null;
-        if (this.enabled) {
-            try {
-                this.storage = options.storage !== undefined ? options.storage : typeof window !== 'undefined' ? window.localStorage : null;
-            } catch { this.startupIssues.push('浏览器禁止本地存储，本次仍可调参及导出'); }
-            try {
-                const value = options.url ?? (typeof window !== 'undefined' ? window.location.href : '');
-                this.url = value ? new URL(value) : null;
-            } catch { this.startupIssues.push('测试链接不是有效的绝对地址，已忽略链接配置'); }
-        }
-        this.panelRequested = !!(this.enabled && this.url?.searchParams.get('qxConfig') === '1');
+        let storage: ConfigStorage | null = null, url: URL | null = null;
+        try {
+            storage = options.storage !== undefined ? options.storage : typeof window !== 'undefined' ? window.localStorage : null;
+        } catch { this.startupIssues.push('浏览器禁止本地存储，本次仍可调参及导出'); }
+        try {
+            const value = options.url ?? (typeof window !== 'undefined' ? window.location.href : '');
+            url = value ? new URL(value) : null;
+        } catch { this.startupIssues.push('测试链接不是有效的绝对地址，已忽略链接配置'); }
+        this.storage = storage; this.url = url;
+        this.panelRequested = url?.searchParams.get('qxConfig') === '1';
     }
 
     /**
@@ -51,7 +47,6 @@ export class ConfigTestSession {
      * 宽松导入跳过的未知键或非法字段同样作为提示返回，其余有效值照常应用。
      */
     restore(): readonly string[] {
-        if (!this.enabled) return [];
         if (this.restored) return [];
         if (this.store.snapshot().started) throw new ConfigError(['请在游戏启动及配置 start 之前恢复测试参数']);
         this.restored = true;
@@ -69,7 +64,6 @@ export class ConfigTestSession {
 
     /** 将相对项目基准的改动保存到本浏览器；失败时明确报错，不伪造保存成功。 */
     save(): void {
-        this.assertEnabled();
         if (!this.storage) throw new ConfigError(['当前环境没有可用的本地存储，请导出 JSON 保存']);
         const text = this.store.exportJSON('改动');
         if (text.length > CONFIG_TEXT_LIMIT) throw new ConfigError(['配置超过本地恢复的 64K 字符限制，请缩减配置']);
@@ -79,7 +73,6 @@ export class ConfigTestSession {
 
     /** 清除本次及本地覆盖，回到项目文件和默认值；不触发游戏重开或刷新网页。 */
     reset(): readonly string[] {
-        this.assertEnabled();
         this.store.replaceLayers({ 本地: {}, 会话: {} });
         const issues: string[] = [];
         try { this.storage?.removeItem(this.storageKey); }
@@ -91,7 +84,6 @@ export class ConfigTestSession {
 
     /** 生成携带相对项目基准改动的复现链接；不访问网络、不自动复制或跳转。 */
     shareURL(): string {
-        this.assertEnabled();
         if (!this.url || ['http:', 'https:'].indexOf(this.url.protocol) === -1)
             throw new ConfigError(['复现链接需要通过 HTTP 或 HTTPS 打开的测试页面，请改用 JSON']);
         const result = new URL(this.url.href);
@@ -99,11 +91,6 @@ export class ConfigTestSession {
         result.searchParams.set('qxValues', JSON.stringify(this.store.exportDocument('改动')));
         if (result.href.length > 8000) throw new ConfigError(['配置链接过长，请使用 JSON 文件复现']);
         return result.href;
-    }
-
-    /** 检查项目设置中的调试开关，不能仅凭地址参数开启测试能力。 */
-    private assertEnabled(): void {
-        if (!this.enabled) throw new ConfigError(['此运行版本未启用配置调试工具']);
     }
 }
 

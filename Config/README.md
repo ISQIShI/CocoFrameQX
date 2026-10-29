@@ -2,11 +2,13 @@
 
 面向 PA 项目的快速实现和调试：程序在一处声明参数与约束，测试人员在 Web 测试包中修改、保存、导入导出和分享配置。无需后端服务，无需为调参重写游戏常量或每次重新打包。
 
+分为两部分：**配置核心**（本目录）可独立作为项目配置管理模块使用——声明、分层、校验、迁移、项目 JSON 导入导出、场景绑定与类型化读取；**调试工具**（`Tools/`）在核心之上提供本地保存、链接复现与 Web 面板，通过插件接口按需接入。依赖方向只有“工具 → 核心”。
+
 本模块独立于具体玩法，不会自动接入或修改场景。各项目在业务目录声明自己的参数和组件绑定，下文示例数值不代表项目策划规则。
 
 编译环境：Creator 默认 ES2015 声明库及 isolatedModules；strict 开关开启或关闭都能编译。除可选的 CocosConfigLoader 外不依赖 `cc`，不创建全局单例。
 
-唯一接入方式：用链式构建器与 `defineConfig` 声明参数，用 `definition.setup(...)…start()` 启动，用 `definition.values` 读取。`ConfigStore` 是内部核心，由启动链创建。
+唯一接入方式：用链式构建器与 `defineConfig` 声明参数，用 `definition.setup(...)…start()` 启动，用 `definition.values` 读取。`ConfigStore` 是内部核心，由启动链创建。附加功能用 `.use(插件)` 接入。
 
 ## 1. 文件与职责
 
@@ -15,13 +17,15 @@
 | ConfigTypes.ts | 字段声明、类型推导、文档格式、更新结果、中文校验错误 |
 | ConfigBuilder.ts | 链式字段构建器：`num / bool / text / choice / json / vec / color` |
 | ConfigDefinition.ts | `defineConfig / group`：嵌套定义 → 扁平配置表、默认值和类型化读取视图 |
-| ConfigSetup.ts | `definition.setup(...)…start()` 链式启动，返回 `ConfigRuntime` |
+| ConfigSetup.ts | `definition.setup(...)…start()` 链式启动，返回 `ConfigRuntime`；定义扩展 `ConfigExtension` 与插件 `ConfigPlugin` 接口 |
 | ConfigBinder.ts | 把现有组件属性登记为配置字段，启动时写入、退出时恢复 |
 | ConfigStore.ts | 默认值与分层覆盖、整批校验、只读快照、变更订阅、生效时机、文档导入导出 |
-| ConfigTestSession.ts | 测试开关、本地保存/恢复、URL 复现、缓存隔离 |
-| ConfigDebugPanel.ts | 独立 Web 面板：浅色主题，宽屏右侧抽屉、窄屏底部面板，按分组逐级进入、搜索、统一应用，导入导出独立页 |
 | CocosConfigLoader.ts | 可选：`loadConfigDocument` 从 resources 异步加载项目配置文档 |
-| index.ts | 核心及 Web 工具出口；引擎加载器使用独立导入 |
+| index.ts | 核心出口（不含调试工具）；引擎加载器使用独立导入 |
+| Tools/ConfigTestSession.ts | 调试工具：本地保存/恢复、URL 复现、缓存隔离 |
+| Tools/ConfigDebugPanel.ts | 调试工具：Web 面板（浅色主题，宽屏右侧抽屉、窄屏底部面板，逐级分组、搜索、统一应用，导入导出独立页） |
+| Tools/ConfigTestTools.ts | 调试工具：把测试会话与面板接入启动流程的插件 |
+| Tools/index.ts | 调试工具出口 |
 
 ## 2. 最快接入：一处声明、一条链启动
 
@@ -52,16 +56,24 @@ GAME.values.debug.tint;        // readonly number[]
 ```
 
 ```typescript
-// 唯一游戏入口，在创建刚体、场地等实际对象之前调用。
+// 只用配置核心：唯一游戏入口，在创建刚体、场地等实际对象之前调用。
 const runtime = GAME.setup('项目唯一标识', 1)
     .validate(v => v.launch.minSpeed <= v.launch.maxSpeed ? [] : ['最小发射速度不能大于最大速度'])
     .projectDocument(projectJsonAsset?.json)          // 可选，包内项目层
-    .testTools({ enabled: 测试包, onPanelVisibilityChange: visible => 暂停或恢复输入(visible) })
     .onChange(snapshot => { if (snapshot.changed.indexOf('debug.bounds') !== -1) 刷新边界(); })
     .start();
 runtime.warnings.forEach(text => console.warn(text));
-runtime.panel.mount();          // 游戏就绪后再挂载面板
-// onDestroy：runtime.dispose();  幂等，读取视图回到默认值，扩展写入的组件值被恢复
+// onDestroy：runtime.dispose();  幂等，读取视图回到默认值，扩展写入的组件值被恢复，插件被释放
+```
+
+```typescript
+// 测试包再接入调试工具：由入口按开关创建插件，核心不感知。
+import { ConfigTestTools } from './CocoFrameQX/Config/Tools';
+
+const tools = 测试包 ? new ConfigTestTools({ panel: { onVisibilityChange: visible => 暂停或恢复输入(visible) } }) : null;
+const runtime = GAME.setup('项目唯一标识', 1).projectDocument(projectJsonAsset?.json).use(tools).start();
+tools?.mount();                 // 游戏就绪后挂载面板；无 DOM 时返回 false
+tools?.session?.save();         // 会话与面板在启动后可用（panel: false 时只有会话）
 ```
 
 - 字段方法：`label` 标题（省略时用键名）、`describe` 说明、`live` 实时 / `restart` 重启（默认）、数值与向量的 `range / min / max / int / step`、文本的 `maxLength`。
@@ -69,7 +81,8 @@ runtime.panel.mount();          // 游戏就绪后再挂载面板
 - 扁平键由路径拼接，如 `launch.minSpeed`、`animals.1.radius`；JSON、面板、`store.get` 都使用扁平键。
 - 子组可以由程序生成，例如按等级循环创建 `group(名称, {...})` 放入 `Record<string, …>`，读取时 `values.animals[level].radius`。
 - 跨字段校验函数收到嵌套值 `v` 与全部扁平值 `flat`（含扩展字段），返回中文问题列表；必须是纯检查。
-- `start()` 的固定顺序：创建容器 → 项目层 → 本地与链接 → 锁定重启参数 → 接入定义 → 应用扩展 → 订阅。任一步失败会撤销已完成的接入后抛出。
+- `start()` 的固定顺序：合并字段 → 创建容器 → 项目层 → 各插件 `beforeStart`（如恢复本地与链接） → 锁定重启参数 → 接入定义 → 应用扩展 → 订阅 → 各插件 `afterStart`（如创建面板）。任一步失败会撤销已完成的接入（含已启动插件的 `dispose`）后抛出。
+- 插件 `ConfigPlugin { beforeStart?(store), afterStart?(store), dispose?() }`：`beforeStart` 可写本地或会话层并返回提示（并入 `runtime.warnings`），`dispose` 在释放时按注册逆序调用。`.use(null)` 被忽略，便于按开关传入。扩展（如绑定器）负责“补充字段并写入目标”，插件负责“在启动流程中附加行为”。
 - 同一定义同一时刻只能接入一个运行容器；第二个入口启动会报错，不会污染当前值。
 
 ## 3. 绑定现有组件属性
@@ -128,8 +141,8 @@ GAME.setup('项目', 1).extend(scene)…start();
 
 ## 7. 策划在测试包中的操作
 
-1. 打开 Web 测试包（HTTP/HTTPS），点击右上角“参数”。参数按分组折叠，可搜索标题、分组或参数键；搜索时自动展开命中分组。
-2. 修改后点击“应用参数”，只提交改动过的字段，来源列显示每个值来自默认、项目、本地还是会话。没有改动时提示“没有改动”。
+1. 打开 Web 测试包（HTTP/HTTPS），点击右上角“测试参数”。从分组目录逐级进入末级分组，或直接搜索标题、分组或参数键；分组页可用上一组/下一组在同级之间切换。
+2. 修改后点击底部“应用 N 项改动”，只提交改动过的字段；每行标出值来自默认、项目、本地还是会话。没有改动时提示“没有改动”。
 3. 实时字段按业务接入逻辑生效；重启字段需“保存到本机”后刷新页面。
 4. “导入导出”页先选导出范围（本次改动 `改动` / 项目配置 `非默认` / 全部参数 `全部`），“导出到文本框”与“下载 JSON”按所选范围输出；复现链接与保存到本机固定为 `改动`；导入支持粘贴文本或选择文件，跳过的内容会列在状态栏。
 5. “生成复现链接”携带改动，可复制给程序或其他测试人员。配置过大时改传 JSON。
@@ -139,11 +152,11 @@ GAME.setup('项目', 1).extend(scene)…start();
 
 ## 8. 测试包与正式发布边界
 
-- 由项目显式传入 `testTools({ enabled })`。关闭后不读取测试缓存或 URL，不创建面板，不提供保存、清除和分享操作；项目配置照常使用。
+- 是否接入由项目决定：正式版本不创建 `ConfigTestTools`（不 `.use`），核心不会读取测试缓存或 URL，不创建面板；项目配置照常使用。`ConfigTestSession` 创建即启用，也可不经插件直接搭配自定义界面使用。
 - 测试工具不请求远端配置，配置字符串仅作为数据解析。
 - 核心适用于 Web、原生及纯逻辑测试。Web 面板依赖 DOM、Shadow DOM 和文件下载能力；原生/无 DOM 环境不会创建它。可将 `sys.localStorage` 通过 `storage` 传入。
-- 关闭测试工具时的发布开销：运行时只构造两个空闲对象（测试会话不读存储与链接，面板 `mount` 直接返回 false），不创建 DOM、样式或监听；但 `ConfigSetup` 静态引用面板，面板代码（未压缩约 35 KB，主要是样式字符串与控件逻辑）仍会进入包体。需要剔除时，可改为由项目注入面板工厂或动态加载，目前未做。
-- 面板内的触摸、鼠标和键盘事件停止冒泡。若项目在 window/document 捕获阶段监听输入，必须用 `onPanelVisibilityChange` 协调输入暂停。
+- 发布开销：不接入工具时运行时零开销（不构造会话或面板）。包体方面核心不再引用工具，只引用核心的项目不会打入 `Tools/`；若入口脚本仍静态导入 `ConfigTestTools`（如 AnimalMerge 的 GameController），工具代码（面板未压缩约 35 KB）仍会进入包体，需要剔除时把创建工具的代码放到只在测试包启用的独立脚本中。
+- 面板内的触摸、鼠标和键盘事件停止冒泡。若项目在 window/document 捕获阶段监听输入，必须用面板选项 `onVisibilityChange` 协调输入暂停。
 
 ## 9. 常用 API
 
@@ -153,9 +166,10 @@ GAME.setup('项目', 1).extend(scene)…start();
 | 查看目标、来源、待重启与本次变化 | `store.snapshot()` |
 | 合并少量覆盖 | `store.patchLayer('会话', { 'launch.minSpeed': 12 })`，返回 `{ changed, deferred }` |
 | 替换覆盖层，空对象撤销 | `store.replaceLayer('会话', {})` / `store.replaceLayers({ 本地: {}, 会话: {} })` |
-| 导入 / 导出 | `store.importDocument(json)` 返回跳过提示；`store.exportJSON('改动' 或 '全部')` |
+| 导入 / 导出 | `store.importDocument(json)` 返回跳过提示；`store.exportJSON('改动' / '非默认' / '全部')` |
 | 观察成功提交 | `store.subscribe(listener)` 或 `setup.onChange(listener)` |
-| 保存、恢复、重置、分享 | `session.save / restore / reset / shareURL` |
+| 接入附加功能 | `setup.use(plugin)`；测试工具 `new ConfigTestTools(options)`，启动后 `tools.session / tools.panel / tools.mount()` |
+| 保存、恢复、重置、分享（工具） | `tools.session.save / reset / shareURL`（恢复由插件在启动前完成） |
 | 释放 | `runtime.dispose()` |
 
 监听异常不回滚已提交配置，也不阻断其他观察者。通知中同步改写配置会报错；需要连带更新时，应在提交前一起计算，或在业务下一次更新时发起新事务。
@@ -171,6 +185,6 @@ node tools/coco-frame-qx/config.test.cjs
 node tools/coco-frame-qx/config-panel.test.cjs <Playwright模块绝对路径> <浏览器可执行文件绝对路径>
 ```
 
-第一条包含严格类型检查（含嵌套定义推导和错误键的编译期断言）与 29 项核心、构建器、链式启动、绑定器、存储和加载器检查；第二条用独立无头浏览器和内存网页验证 6 组面板行为（含标签筛选、撤销、外部变化保留输入、宽窄屏布局、二次确认）。
+第一条包含严格类型检查（含嵌套定义推导和错误键的编译期断言）与 30 项核心、构建器、链式启动、插件、绑定器、存储和加载器检查（含“核心不引用工具、未接入工具时不访问存储与地址”）；第二条用独立无头浏览器和内存网页验证 6 组面板行为（含标签筛选、撤销、外部变化保留输入、宽窄屏布局、二次确认）。
 
 2026-10-27 交付验证：严格及项目实际非严格类型检查无诊断；28 项核心检查与 6 组无头 Edge 面板检查通过；AnimalMerge 已迁移到本系统并通过其 63 项逻辑及 3 组面板检查。未运行真实 Cocos Preview、实际打包产物或原生包。

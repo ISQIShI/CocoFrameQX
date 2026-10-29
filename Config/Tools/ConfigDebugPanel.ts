@@ -1,6 +1,6 @@
-import { ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from './ConfigTypes';
+import { ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
 import { ConfigTestSession, message } from './ConfigTestSession';
-import { CONFIG_TEXT_LIMIT, ConfigSnapshot, configEqual } from './ConfigStore';
+import { CONFIG_TEXT_LIMIT, ConfigSnapshot, configEqual } from '../ConfigStore';
 
 /** 面板打开时项目可暂停自己的输入；关闭时只撤销这一个暂停原因。 */
 export interface ConfigPanelOptions { onVisibilityChange?: (visible: boolean) => void }
@@ -205,10 +205,10 @@ export class ConfigDebugPanel {
     /** 保留测试会话和输入协调回调；构造本身不创建 DOM 或监听。 */
     constructor(private readonly session: ConfigTestSession, private readonly options: ConfigPanelOptions = {}) {}
 
-    /** 创建“测试参数”入口与抽屉；关闭测试能力或没有 DOM 时返回 false，不影响游戏启动。 */
+    /** 创建“测试参数”入口与抽屉；没有 DOM（原生或纯逻辑环境）时返回 false，不影响游戏启动。 */
     mount(): boolean {
         if (this.host) return true;
-        if (!this.session.enabled || typeof document === 'undefined' || !document.body) return false;
+        if (typeof document === 'undefined' || !document.body) return false;
         const store = this.session.store;
         const host = document.createElement('div');
         host.style.cssText = 'position:fixed;top:0;left:0;width:0;height:0;z-index:2147483647;';
