@@ -1,31 +1,45 @@
 import { ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
+/** 定义节点在声明阶段收集的公共属性；未设置的项为 undefined。 */
+export interface ConfigNodeInfo {
+    readonly label: string | undefined;
+    readonly description: string | undefined;
+    readonly timing: ConfigTiming | undefined;
+}
+
 /**
- * 链式字段构建器基类：在声明阶段收集标题、说明与生效时机，由配置定义统一生成字段。
- * 链式调用只发生在声明期，运行时读取不经过构建器。
+ * 定义节点基类（组合模式）：字段（叶子）与分组（容器）共用标题、说明与生效时机的链式声明。
+ * 分组上的生效时机向下继承，字段或更近的分组自行声明时优先。链式调用只发生在声明期。
  */
-export abstract class FieldBuilder<V extends ConfigValue> {
-    /** 仅供类型推导的取值类型标记，运行时不存在。 */
-    declare readonly valueType: V;
-    private text = '';
+export abstract class ConfigNodeBuilder {
+    private text: string | undefined;
     private note: string | undefined;
     private timingValue: ConfigTiming | undefined;
 
-    /** 设置面板标题；省略时使用字段键名。 */
+    /** 设置面板标题；省略时使用键名。 */
     label(text: string): this { this.text = text; return this; }
     /** 设置面板补充说明。 */
     describe(text: string): this { this.note = text; return this; }
-    /** 应用后立即生效；业务须在使用点读取或订阅变化。 */
+    /** 应用后立即生效；用于分组时作为组内参数的默认时机。业务须在使用点读取或订阅变化。 */
     live(): this { this.timingValue = '实时'; return this; }
-    /** 保存后重新启动生效（默认）。 */
+    /** 保存后重新启动生效（未声明时的默认）；用于分组时作为组内参数的默认时机。 */
     restart(): this { this.timingValue = '重启'; return this; }
+    /** 读取已声明的公共属性。 */
+    info(): ConfigNodeInfo { return { label: this.text, description: this.note, timing: this.timingValue }; }
+}
 
-    /** 生成字段声明；group 来自所在分组路径，省略标题时使用键名。 */
-    build(key: string, group?: string): ConfigField {
-        const info: ConfigDescription = { label: this.text || key };
+/** 链式字段构建器：在声明阶段收集属性，由配置定义统一生成字段；运行时读取不经过构建器。 */
+export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuilder {
+    /** 仅供类型推导的取值类型标记，运行时不存在。 */
+    declare readonly valueType: V;
+
+    /** 生成字段声明；group 为所在分组的键路径，timing 为继承的生效时机，省略标题时使用键名。 */
+    build(key: string, group?: string, timing?: ConfigTiming): ConfigField {
+        const own = this.info(), info: ConfigDescription = { label: own.label || key };
         if (group) info.group = group;
-        if (this.note !== undefined) info.description = this.note;
-        if (this.timingValue !== undefined) info.timing = this.timingValue;
+        if (own.description !== undefined) info.description = own.description;
+        const resolved = own.timing ?? timing;
+        if (resolved !== undefined) info.timing = resolved;
         return this.create(info);
     }
     /** 由具体类型生成字段。 */

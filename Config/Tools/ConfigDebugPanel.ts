@@ -8,9 +8,9 @@ export interface ConfigPanelOptions { onVisibilityChange?: (visible: boolean) =>
 /** 一个字段的控件：读取可能因输入不完整而抛出，写入只改控件显示。 */
 interface FieldControl { element: HTMLElement; focus: HTMLElement; read: () => ConfigValue; write: (value: ConfigValue) => void }
 
-/** 分组树节点：分组路径按“·”逐级拆分；rows 为本级字段，all 含全部下级字段。 */
+/** 分组树节点：key 为分组键路径（未分组为空），name 为显示标题；rows 为本级字段，all 含全部下级字段。 */
 interface GroupNode {
-    name: string; title: string; parent: GroupNode | null; children: GroupNode[];
+    key: string; name: string; title: string; description: string | undefined; parent: GroupNode | null; children: GroupNode[];
     rows: FieldRow[]; all: FieldRow[]; section: HTMLDivElement | null;
 }
 
@@ -193,7 +193,7 @@ export class ConfigDebugPanel {
     private undoButton: HTMLButtonElement | null = null;
     private resetButton: HTMLButtonElement | null = null;
     private rows: FieldRow[] = [];
-    private root: GroupNode = { name: '', title: '', parent: null, children: [], rows: [], all: [], section: null };
+    private root: GroupNode = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
     private view: PanelView = { kind: 'node', node: this.root };
     private exchangeOpen = false;
     private exportScope: ConfigExportScope = '改动';
@@ -300,24 +300,29 @@ export class ConfigDebugPanel {
         this.directory = null; this.list = null; this.empty = null; this.exchange = null; this.exchangeButton = null; this.text = null;
         this.summary = null; this.status = null; this.applyButton = null; this.undoButton = null; this.resetButton = null;
         this.rows = [];
-        this.root = { name: '', title: '', parent: null, children: [], rows: [], all: [], section: null };
+        this.root = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
         this.view = { kind: 'node', node: this.root };
     }
 
-    /** 按声明一次创建分组树与全部行；分组路径按“·”拆为逐级节点，每个含字段的节点对应一个参数区块。 */
+    /**
+     * 按声明一次创建分组树与全部行：层级取自容器分组表的父子关系（键路径），标题只用于显示；
+     * 节点按字段首次出现的顺序建立，没有字段的分组不显示；每个含字段的节点对应一个参数区块。
+     */
     private buildRows(): void {
+        const declared = new Map(this.session.store.groups().map(item => [item.key, item] as const)), nodes = new Map<string, GroupNode>();
+        const nodeOf = (key: string): GroupNode => {
+            let node = nodes.get(key);
+            if (node) return node;
+            const info = declared.get(key), parent = info && info.parent !== null ? nodeOf(info.parent) : this.root, name = info ? info.label : UNGROUPED;
+            node = { key, name, title: parent.title ? parent.title + ' · ' + name : name, description: info?.description,
+                parent, children: [], rows: [], all: [], section: null };
+            parent.children.push(node); nodes.set(key, node);
+            return node;
+        };
         for (const [key, field] of this.session.store.fields()) {
-            let node = this.root;
-            for (const part of (field.group || UNGROUPED).split('·')) {
-                let child = node.children.find(item => item.name === part);
-                if (!child) {
-                    child = { name: part, title: node.title ? node.title + ' · ' + part : part, parent: node, children: [], rows: [], all: [], section: null };
-                    node.children.push(child);
-                }
-                node = child;
-            }
+            const node = nodeOf(field.group || '');
             if (!node.section) node.section = this.buildSection(node);
-            const name = (field.group ? field.group + ' / ' : '') + field.label;
+            const name = node.title + ' / ' + field.label;
             const element = this.element('div', '参数'); element.dataset.key = key;
             if (field.kind === '向量' || field.kind === '数据') element.classList.add('宽');
             const head = this.element('div', '名称');
@@ -332,7 +337,7 @@ export class ConfigDebugPanel {
             details.appendChild(note);
             element.append(head, control.element, details);
             node.section.lastElementChild!.appendChild(element);
-            const row: FieldRow = { key, field, node, search: [key, field.label, field.group || ''].join(' ').toLowerCase(),
+            const row: FieldRow = { key, field, node, search: [key, field.label, node.title].join(' ').toLowerCase(),
                 element, control, marks, note, restore, dirty: false, invalid: false };
             restore.addEventListener('click', () => { control.write(field.defaultValue); this.touch(row); });
             element.addEventListener('input', () => this.touch(row));
@@ -478,7 +483,7 @@ export class ConfigDebugPanel {
         const card = this.element('div', '卡');
         if (node.rows.length && node.children.length) card.appendChild(this.entryButton('本级参数', node.rows.length + ' 项', node.rows, () => this.open(node), true));
         for (const child of node.children) {
-            const groups = child.children.length, note = (groups ? groups + ' 组 · ' : '') + child.all.length + ' 项';
+            const groups = child.children.length, note = (groups ? groups + ' 组 · ' : '') + child.all.length + ' 项' + (child.description ? ' · ' + child.description : '');
             card.appendChild(this.entryButton(child.name, note, child.all, () => this.enter(child)));
         }
         cards.push(card);

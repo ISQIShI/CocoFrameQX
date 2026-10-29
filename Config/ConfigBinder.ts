@@ -1,6 +1,6 @@
 import type { FieldBuilder } from './ConfigBuilder';
 import type { ConfigExtension, ConfigReader } from './ConfigSetup';
-import { ConfigDescription, ConfigError, ConfigField, ConfigSchema, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
+import { ConfigDescription, ConfigError, ConfigField, ConfigGroupInfo, ConfigSchema, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
 /** 绑定器默认选项；guard 返回假时跳过对该目标的写入，例如目标组件已被销毁。 */
 export interface ConfigBinderOptions {
@@ -32,6 +32,8 @@ interface Binding { key: string; target: object; initial: ConfigValue; write: (v
  */
 export class ConfigBinder implements ConfigExtension {
     readonly schema: ConfigSchema = Object.create(null);
+    /** 作用域登记的分组，键为作用域前缀。 */
+    readonly groups: ConfigGroupInfo[] = [];
     private readonly bindings: Binding[] = [];
 
     /** 保存默认生效时机、说明与写入守卫。 */
@@ -40,8 +42,19 @@ export class ConfigBinder implements ConfigExtension {
     /** 已登记的字段数量。 */
     get size(): number { return this.bindings.length; }
 
-    /** 创建键前缀与面板分组相同的绑定作用域。 */
-    scope(prefix: string, group: string): ConfigBinderScope { return new ConfigBinderScope(this, prefix, group); }
+    /** 创建绑定作用域，并以键前缀为身份登记标题为 label 的分组；同一前缀重复使用时标题必须一致。 */
+    scope(prefix: string, label: string, description?: string): ConfigBinderScope {
+        this.group(prefix, label, description);
+        return new ConfigBinderScope(this, prefix, prefix);
+    }
+
+    /** 登记分组；已登记的同键分组只校验标题一致。 */
+    group(key: string, label: string, description?: string): this {
+        const known = this.groups.find(item => item.key === key);
+        if (known && known.label !== label) throw new ConfigError(['绑定分组标题冲突：' + key + '（' + known.label + ' / ' + label + '）']);
+        if (!known) this.groups.push(description !== undefined ? { key, label, description } : { key, label });
+        return this;
+    }
 
     /** 登记任意字段与写入函数；字段默认值即恢复时写回的原值。 */
     register(key: string, field: ConfigField, target: object, write: (value: ConfigValue) => void): this {
@@ -70,13 +83,18 @@ export class ConfigBinder implements ConfigExtension {
     }
 }
 
-/** 绑定作用域：键为“前缀.名称”，所有字段归入同一面板分组；方法均可链式调用。 */
+/** 绑定作用域：键为“前缀.名称”，字段归入 group（分组键路径）；方法均可链式调用。 */
 export class ConfigBinderScope {
     /** 由 ConfigBinder.scope 创建。 */
     constructor(private readonly binder: ConfigBinder, readonly prefix: string, readonly group: string) {}
 
-    /** 创建子作用域，分组默认沿用当前分组。 */
-    scope(name: string, group: string = this.group): ConfigBinderScope { return new ConfigBinderScope(this.binder, this.prefix + '.' + name, group); }
+    /** 创建子作用域：给出标题时登记为当前分组下的子分组，省略时字段仍归入当前分组。 */
+    scope(name: string, label?: string, description?: string): ConfigBinderScope {
+        const prefix = this.prefix + '.' + name;
+        if (label === undefined) return new ConfigBinderScope(this.binder, prefix, this.group);
+        this.binder.group(prefix, label, description);
+        return new ConfigBinderScope(this.binder, prefix, prefix);
+    }
 
     /** 绑定数值、开关或文本属性，类型按当前值自动识别。 */
     value<T extends object, K extends keyof T & string>(target: T, property: K, label: string, options: ConfigBindOptions = {}): this {

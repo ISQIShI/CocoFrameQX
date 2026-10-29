@@ -77,9 +77,11 @@ tools?.session?.save();         // 会话与面板在启动后可用（panel: fa
 ```
 
 - 字段方法：`label` 标题（省略时用键名）、`describe` 说明、`live` 实时 / `restart` 重启（默认）、数值与向量的 `range / min / max / int / step`、文本的 `maxLength`。
-- `group(标题, 子项)` 成为面板分组，多层以“·”连接（如“动物物理·小鸡”）；普通嵌套对象只扩展键路径。键名不能含点号。
+- 分组是与字段同类的定义节点：`group({ … }).label(标题).describe(说明).live()`，或简写 `group(标题, { … })`；省略标题时用键名。分组上的 `live()/restart()` 是组内默认生效时机，字段或更近的分组自行声明时优先。
+- 分组身份与层级取自它在定义树中的**键路径**（如 `animals.1`），标题只用于显示，可含任意字符、可与其他分组同名；字段的 `group` 存所属分组键路径。普通嵌套对象只扩展键路径、不形成分组。键名不能含点号。
+- `definition.groups` 列出分组（键、标题、说明）；容器 `store.groups()` 另带 `parent`（键路径前缀中最近的分组），面板目录据此建立。分组只是显示元数据，不参与取值、分层与导出。
 - 扁平键由路径拼接，如 `launch.minSpeed`、`animals.1.radius`；JSON、面板、`store.get` 都使用扁平键。
-- 子组可以由程序生成，例如按等级循环创建 `group(名称, {...})` 放入 `Record<string, …>`，读取时 `values.animals[level].radius`。
+- 子组可以由程序生成，例如按等级循环创建 `group(名称, {...})` 放入 `Record<string, …>`，读取时 `values.animals[level].radius`；面板中按 `animals.<等级>` 区分，同名也不会合并。
 - 跨字段校验函数收到嵌套值 `v` 与全部扁平值 `flat`（含扩展字段），返回中文问题列表；必须是纯检查。
 - `start()` 的固定顺序：合并字段 → 创建容器 → 项目层 → 各插件 `beforeStart`（如恢复本地与链接） → 锁定重启参数 → 接入定义 → 应用扩展 → 订阅 → 各插件 `afterStart`（如创建面板）。任一步失败会撤销已完成的接入（含已启动插件的 `dispose`）后抛出。
 - 插件 `ConfigPlugin { beforeStart?(store), afterStart?(store), dispose?() }`：`beforeStart` 可写本地或会话层并返回提示（并入 `runtime.warnings`），`dispose` 在释放时按注册逆序调用。`.use(null)` 被忽略，便于按开关传入。扩展（如绑定器）负责“补充字段并写入目标”，插件负责“在启动流程中附加行为”。
@@ -102,8 +104,9 @@ GAME.setup('项目', 1).extend(scene)…start();
 ```
 
 - `value` 自动识别数值、开关、文本；`vector` 复制当前对象（优先 `clone()`）后整体赋值，触发引擎属性 setter；`position` 通过 `setPosition(x, y, z)` 写入；`custom` 登记任意字段与写入函数。
+- `scope(前缀, 标题, 说明?)` 以前缀为身份登记分组，同一前缀再次使用时标题必须一致；子作用域 `scope(名称, 标题?)` 给出标题时成为子分组，省略时字段仍归入当前分组（适合多个实例共用一组，如 `scope('scene.cards', '订单实例').scope(String(i))`）。键路径位于某分组之下的作用域自动成为其子分组。
 - `guard` 返回假时跳过写入，用于已销毁的组件。绑定默认“重启”生效：只在启动时写一次，不在运行中搬动物体。
-- 自定义扩展只需实现 `{ schema, apply(store), restore() }`；可选 `update(store, changed)` 在启动后生效值变化时调用（先于 `onChange`）。`ConfigBinder` 借此在实时绑定字段变化时只重写变化项。
+- 自定义扩展只需实现 `{ schema, apply(store), restore() }`，可选 `groups` 补充分组（与定义同键时标题须一致）；可选 `update(store, changed)` 在启动后生效值变化时调用（先于 `onChange`）。`ConfigBinder` 借此在实时绑定字段变化时只重写变化项。
 
 ## 4. 优先级与生效时机
 

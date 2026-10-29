@@ -17,12 +17,24 @@ export type ConfigRecord = Readonly<Record<string, ConfigValue>>;
 /** 参数的生效时机；涉及初始场地、刚体结构等参数默认在重启后生效。 */
 export type ConfigTiming = '实时' | '重启';
 
-/** 参数在测试面板中的中文说明。 */
+/** 参数在测试面板中的中文说明；group 为所属分组的键路径（分组身份），不是显示标题。 */
 export interface ConfigDescription {
     label: string;
     group?: string;
     description?: string;
     timing?: ConfigTiming;
+}
+
+/** 分组声明：key 为分组在定义树中的键路径，作为稳定身份与层级依据；label 只用于显示。 */
+export interface ConfigGroupInfo {
+    key: string;
+    label: string;
+    description?: string;
+}
+
+/** 容器整理后的分组：parent 为键路径前缀中最近的已声明分组，顶级分组为 null。 */
+export interface ConfigGroupEntry extends ConfigGroupInfo {
+    readonly parent: string | null;
 }
 
 /** 数值约束，数值字段与向量字段的每个分量共用。 */

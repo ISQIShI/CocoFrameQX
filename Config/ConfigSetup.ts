@@ -1,6 +1,6 @@
 import type { ConfigDefinition, ConfigTree, ConfigTreeValues } from './ConfigDefinition';
 import { ConfigSnapshot, ConfigStore } from './ConfigStore';
-import { ConfigError, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
+import { ConfigError, ConfigGroupInfo, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
 
 /** 容器读取接口，扩展只需按键读取生效值。 */
 export interface ConfigReader { get(key: string): ConfigValue }
@@ -8,6 +8,8 @@ export interface ConfigReader { get(key: string): ConfigValue }
 /** 启动扩展：补充扁平字段，在容器启动后应用生效值，实时字段变化时按变化键更新，退出时恢复原状。 */
 export interface ConfigExtension {
     readonly schema: ConfigSchema;
+    /** 补充的分组；与定义或其他扩展同键时标题必须一致，视为同一分组。 */
+    readonly groups?: readonly ConfigGroupInfo[];
     apply(store: ConfigReader): void;
     /** 启动后生效值变化时调用，先于 onChange 监听；changed 为本次生效值变化的全部键。 */
     update?(store: ConfigReader, changed: readonly string[]): void;
@@ -84,8 +86,16 @@ export class ConfigSetup<T extends ConfigTree> {
                 schema[key] = source[key];
             }
         }
+        const groups: ConfigGroupInfo[] = [], seen: Record<string, ConfigGroupInfo> = Object.create(null);
+        for (const source of [this.definition.groups, ...this.extensions.map(extension => extension.groups || [])]) {
+            for (const info of source) {
+                const known = seen[info.key];
+                if (!known) { seen[info.key] = info; groups.push(info); }
+                else if (known.label !== info.label) throw new ConfigError(['分组标题冲突：' + info.key + '（' + known.label + ' / ' + info.label + '）']);
+            }
+        }
         const validators = this.validators.slice(), definition = this.definition;
-        const store = new ConfigStore({ project: this.project, version: this.version, schema,
+        const store = new ConfigStore({ project: this.project, version: this.version, schema, groups,
             migrate: this.migration, onListenerError: this.listenerError,
             validate: flat => {
                 if (!validators.length) return [];

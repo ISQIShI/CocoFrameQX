@@ -1,4 +1,4 @@
-import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema, ConfigUpdateResult,
+import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigGroupEntry, ConfigGroupInfo, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema, ConfigUpdateResult,
     ConfigValue } from './ConfigTypes';
 
 const LAYERS: readonly ConfigLayer[] = ['项目', '本地', '会话'];
@@ -10,6 +10,8 @@ export interface ConfigStoreOptions {
     project: string;
     version: number;
     schema: ConfigSchema;
+    /** 分组声明，按显示顺序；字段引用了未声明的分组时自动补一个以键为标题的分组。 */
+    groups?: readonly ConfigGroupInfo[];
     validate?: (values: ConfigRecord) => readonly string[];
     /** 导入低于当前版本的文档时调用；未提供时按当前声明直接导入。 */
     migrate?: ConfigMigration;
@@ -111,6 +113,7 @@ function declarationIssue(key: string, field: ConfigField): string | null {
     if (!safeKey(key)) return '配置键不合法：' + key;
     if (!field.label || !field.label.trim() || (field.timing !== undefined && field.timing !== '实时' && field.timing !== '重启'))
         return '参数说明或生效时机无效：' + key;
+    if (field.group !== undefined && (typeof field.group !== 'string' || !field.group)) return '参数分组必须为非空键路径：' + key;
     if ((field.kind === '数值' || field.kind === '向量') &&
         [field.min, field.max, field.step].some(value => value !== undefined && !Number.isFinite(value))) return '数值约束必须为有限数值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') && field.step !== undefined && field.step <= 0) return '面板步长必须大于零：' + key;
@@ -122,6 +125,32 @@ function declarationIssue(key: string, field: ConfigField): string | null {
 }
 
 /**
+ * 整理分组：校验声明，补齐字段引用的未声明分组，按键路径前缀确定父分组。
+ * 分组只是显示与导航用的元数据，不参与取值、分层和导出。
+ */
+function resolveGroups(declared: readonly ConfigGroupInfo[], schema: ConfigSchema): readonly ConfigGroupEntry[] {
+    const groups: Record<string, ConfigGroupInfo> = Object.create(null), order: string[] = [];
+    const add = (info: ConfigGroupInfo) => {
+        if (!safeKey(info.key)) throw new ConfigError(['分组键不合法：' + info.key]);
+        if (has(groups, info.key)) throw new ConfigError(['分组重复声明：' + info.key]);
+        if (has(schema, info.key)) throw new ConfigError(['分组键与参数键重复：' + info.key]);
+        if (typeof info.label !== 'string' || !info.label.trim()) throw new ConfigError(['分组标题不能为空：' + info.key]);
+        if (info.description !== undefined && typeof info.description !== 'string') throw new ConfigError(['分组说明必须为文本：' + info.key]);
+        groups[info.key] = info; order.push(info.key);
+    };
+    for (const info of declared) add({ key: info.key, label: info.label, ...(info.description !== undefined ? { description: info.description } : {}) });
+    for (const key of Object.keys(schema)) {
+        const group = schema[key].group;
+        if (group !== undefined && !has(groups, group)) add({ key: group, label: group });
+    }
+    return Object.freeze(order.map(key => {
+        let parent: string | null = null;
+        for (let i = key.lastIndexOf('.'); i > 0 && parent === null; i = key.lastIndexOf('.', i - 1)) if (has(groups, key.slice(0, i))) parent = key.slice(0, i);
+        return Object.freeze({ ...groups[key], parent });
+    }));
+}
+
+/**
  * 与引擎无关的配置容器。优先级：声明默认值 < 项目文件 < 本地保存 < 本次会话。
  * 所有变更先完整校验再提交；业务状态和引擎对象不由此容器管理。通常由 ConfigSetup 创建。
  */
@@ -129,6 +158,7 @@ export class ConfigStore {
     readonly project: string;
     readonly version: number;
     private readonly schema: ConfigSchema;
+    private readonly groupList: readonly ConfigGroupEntry[];
     private readonly options: ConfigStoreOptions;
     private layers: Record<ConfigLayer, Record<string, ConfigValue>> = { 项目: {}, 本地: {}, 会话: {} };
     private state: ConfigSnapshot;
@@ -152,6 +182,7 @@ export class ConfigStore {
                 ...(field.kind === '向量' ? { components: [...field.components] } : {}) } as ConfigField);
         }
         this.schema = Object.freeze(schema);
+        this.groupList = resolveGroups(options.groups || [], schema);
         const values = this.combine(this.layers);
         this.validateValues(values);
         this.state = freeze({ revision: 0, started: false, active: values, desired: values,
@@ -162,6 +193,9 @@ export class ConfigStore {
     fields(): readonly (readonly [string, ConfigField])[] {
         return Object.freeze(Object.keys(this.schema).map(key => Object.freeze([key, this.schema[key]] as const)));
     }
+
+    /** 列出分组（按显示顺序，含父分组键），用于面板目录与文档工具；未分组的字段 group 为空。 */
+    groups(): readonly ConfigGroupEntry[] { return this.groupList; }
 
     /** 判断是否声明了指定键。 */
     hasField(key: string): boolean { return has(this.schema, key); }
