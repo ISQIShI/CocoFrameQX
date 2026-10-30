@@ -129,9 +129,7 @@ function declarationIssue(key: string, field: ConfigField): string | null {
         return '参数说明或生效时机无效：' + key;
     if (field.group !== undefined && (typeof field.group !== 'string' || !field.group)) return '参数分组必须为非空键路径：' + key;
     if (field.unit !== undefined && (typeof field.unit !== 'string' || !field.unit.trim())) return '参数单位必须为非空文本：' + key;
-    if (field.showWhen !== undefined && (!Array.isArray(field.showWhen) ||
-        field.showWhen.some(condition => !condition || typeof condition.key !== 'string' || !Array.isArray(condition.values) || !condition.values.length)))
-        return '参数显示条件必须列出参数键与取值：' + key;
+    if (field.showWhen !== undefined && typeof field.showWhen !== 'function') return '参数显示条件必须为函数：' + key;
     if ((field.kind === '数值' || field.kind === '向量') &&
         [field.min, field.max, field.step].some(value => value !== undefined && !Number.isFinite(value))) return '数值约束必须为有限数值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') && field.step !== undefined && field.step <= 0) return '面板步长必须大于零：' + key;
@@ -200,14 +198,6 @@ export class ConfigStore {
                 ...(field.kind === '向量' ? { components: [...field.components] } : {}) } as ConfigField);
         }
         this.schema = Object.freeze(schema);
-        for (const key of Object.keys(schema)) {
-            for (const condition of schema[key].showWhen || []) {
-                const target = schema[condition.key];
-                if (!target || condition.key === key) throw new ConfigError(['显示条件引用了未声明或自身的参数：' + key + ' → ' + condition.key]);
-                if (condition.values.some(value => fieldIssue(condition.key, target, value) !== null))
-                    throw new ConfigError(['显示条件的取值不符合参数声明：' + key + ' → ' + condition.key]);
-            }
-        }
         this.groupList = resolveGroups(options.groups || [], schema);
         const values = this.combine(this.layers);
         this.validateValues(values);
@@ -230,7 +220,7 @@ export class ConfigStore {
     check(layer: ConfigLayer, values: unknown): readonly ConfigIssue[] {
         try {
             if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
-            const patch = this.readPatch(values, layer);
+            const patch = this.readPatch(values);
             this.validateValues(this.combine({ ...this.layers, [layer]: { ...this.layers[layer], ...patch } }));
             return [];
         } catch (error) {
@@ -265,7 +255,7 @@ export class ConfigStore {
     /** 合并某层的少量字段；删除覆盖请用完整替换，不用空值模拟删除。 */
     patchLayer(layer: ConfigLayer, values: unknown): ConfigUpdateResult {
         if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
-        const patch = this.readPatch(values, layer);
+        const patch = this.readPatch(values);
         return this.replaceLayer(layer, { ...this.layers[layer], ...patch });
     }
 
@@ -280,7 +270,7 @@ export class ConfigStore {
         const next = { ...this.layers };
         for (const key of Object.keys(updates)) {
             if (LAYERS.indexOf(key as ConfigLayer) === -1) throw new ConfigError(['未知配置层：' + key]);
-            next[key as ConfigLayer] = this.readPatch(updates[key as ConfigLayer], key as ConfigLayer);
+            next[key as ConfigLayer] = this.readPatch(updates[key as ConfigLayer]);
         }
         const desired = this.combine(next);
         this.validateValues(desired);
@@ -337,8 +327,7 @@ export class ConfigStore {
         }
         const accepted: Record<string, ConfigValue> = Object.create(null);
         for (const key of Object.keys(values)) {
-            const issue = !has(this.schema, key) ? '未知配置键：' + key : layer !== '项目' && this.schema[key].locked
-                ? this.schema[key].label + '（' + key + '）已锁定，只能在项目配置中修改' : fieldIssue(key, this.schema[key], values[key]);
+            const issue = has(this.schema, key) ? fieldIssue(key, this.schema[key], values[key]) : '未知配置键：' + key;
             if (issue) issues.push(issue + '，已跳过');
             else accepted[key] = values[key];
         }
@@ -384,14 +373,13 @@ export class ConfigStore {
         if (this.notifying) throw new ConfigError(['不能在配置通知中同步改写配置，请在业务下一次更新时提交']);
     }
 
-    /** 逐字段读取覆盖值，不接受拼写错误、隐式类型转换或在本地与会话层覆盖锁定参数；一次列出全部单字段问题。 */
-    private readPatch(input: unknown, layer: ConfigLayer): Record<string, ConfigValue> {
+    /** 逐字段读取覆盖值，不接受拼写错误或隐式类型转换；一次列出全部单字段问题。 */
+    private readPatch(input: unknown): Record<string, ConfigValue> {
         if (!isRecord(input)) throw new ConfigError(['配置值必须为普通对象']);
         const copied = copyValue(input) as Record<string, ConfigValue>, issues: ConfigIssue[] = [];
         for (const key of Object.keys(copied)) {
             if (!has(this.schema, key)) throw new ConfigError(['未知配置键：' + key]);
-            const field = this.schema[key];
-            const issue = layer !== '项目' && field.locked ? field.label + '（' + key + '）已锁定，只能在项目配置中修改' : fieldIssue(key, field, copied[key]);
+            const issue = fieldIssue(key, this.schema[key], copied[key]);
             if (issue) issues.push({ message: issue, keys: [key] });
         }
         if (issues.length) throw new ConfigError(issues);

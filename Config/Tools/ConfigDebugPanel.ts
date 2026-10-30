@@ -1,4 +1,4 @@
-import { ConfigError, ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
+import { ConfigError, ConfigExportScope, ConfigField, ConfigRecord, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
 import { ConfigTestSession, message } from './ConfigTestSession';
 import { CONFIG_TEXT_LIMIT, ConfigSnapshot, configEqual } from '../ConfigStore';
 
@@ -102,9 +102,9 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.参数.非法 .文字::before{background:var(--错)}' +
     '.标记{display:inline-flex;flex-wrap:wrap;gap:4px}.标记 span{color:var(--次);background:var(--浮)}' +
     '.标记 .实时{color:var(--实时);background:var(--实时底)}.标记 .重启{color:var(--重启);background:var(--重启底)}' +
-    '.标记 .输入有误,.标记 .有误,.计数 .有误{color:var(--错);background:var(--错底)}.标记 .锁定{color:var(--次);background:var(--浮)}' +
+    '.标记 .输入有误,.标记 .有误,.计数 .有误{color:var(--错);background:var(--错底)}' +
     '.问题{margin:0;font-size:12px;line-height:1.55;color:var(--错);white-space:pre-wrap;overflow-wrap:anywhere}' +
-    '.单位{flex:none;font-size:12px;color:var(--弱);white-space:nowrap}.参数.锁定 .控件{opacity:.6}' +
+    '.单位{flex:none;font-size:12px;color:var(--弱);white-space:nowrap}' +
     '.条件提示{padding:10px 4px 0;font-size:12px;color:var(--弱)}' +
     '.详情{grid-column:1/-1;display:flex;flex-direction:column;gap:3px;min-width:0}' +
     '.描述{margin:0;font-size:12px;line-height:1.55;color:var(--次);overflow-wrap:anywhere}' +
@@ -133,7 +133,7 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.范围 label{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;align-items:start;padding:8px 12px;cursor:pointer;border-top:1px solid var(--线)}' +
     '.范围 legend+label{border-top:none}.范围 label:hover{background:var(--浮)}.范围 input{margin:2px 0 0;accent-color:var(--主)}' +
     '.范围 b{display:block;font-weight:600}.范围 span span{display:block;font-size:11.5px;color:var(--弱);line-height:1.5}' +
-    '.按钮组{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 16px}.按钮组>*{white-space:normal;text-align:center;line-height:1.35}' +
+    '.按钮组{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 0}.按钮组+.按钮组{margin-bottom:16px}.按钮组>*{white-space:normal;text-align:center;line-height:1.35}' +
     '.小节{margin:4px 0 6px;font-size:12px;font-weight:600;color:var(--次)}' +
     '.文件{display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--面);border:1px solid var(--线强);border-radius:7px;padding:6px 12px}' +
     '.文件:hover{background:var(--浮)}.文件 input{display:none}' +
@@ -201,8 +201,8 @@ export class ConfigDebugPanel {
     private resetButton: HTMLButtonElement | null = null;
     private rows: FieldRow[] = [];
     private rowIndex = new Map<string, FieldRow>();
-    /** 被显示条件引用的参数键；这些参数输入变化时重新筛选可见行。 */
-    private conditionKeys = new Set<string>();
+    /** 是否有参数声明了显示条件；有则任一输入变化都重新筛选可见行。 */
+    private hasConditions = false;
     /** 试算校验中未关联到具体参数的整体问题。 */
     private generalProblems: string[] = [];
     private root: GroupNode = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
@@ -312,7 +312,7 @@ export class ConfigDebugPanel {
         this.backButton = null; this.crumbs = null; this.heading = null; this.searchBar = null; this.search = null; this.siblings = null;
         this.directory = null; this.list = null; this.empty = null; this.hint = null; this.exchange = null; this.exchangeButton = null; this.text = null;
         this.summary = null; this.status = null; this.applyButton = null; this.undoButton = null; this.resetButton = null;
-        this.rows = []; this.rowIndex.clear(); this.conditionKeys.clear(); this.generalProblems = [];
+        this.rows = []; this.rowIndex.clear(); this.hasConditions = false; this.generalProblems = [];
         this.root = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
         this.view = { kind: 'node', node: this.root };
     }
@@ -347,12 +347,7 @@ export class ConfigDebugPanel {
             const control = this.control(field, name); control.element.classList.add('控件');
             if (field.unit) { const unit = this.element('span', '单位'); unit.textContent = field.unit; control.element.appendChild(unit); }
             control.element.appendChild(restore);
-            if (field.locked) {
-                element.classList.add('锁定');
-                control.element.querySelectorAll('input,select,textarea').forEach(input => { (input as HTMLInputElement).disabled = true; });
-                restore.disabled = true;
-            }
-            for (const condition of field.showWhen || []) this.conditionKeys.add(condition.key);
+            if (field.showWhen) this.hasConditions = true;
             const details = this.element('div', '详情'), note = this.element('div', '元');
             const problem = document.createElement('p'); problem.className = '问题'; problem.hidden = true;
             details.appendChild(problem);
@@ -536,7 +531,7 @@ export class ConfigDebugPanel {
     private buildExchange(): HTMLDivElement {
         const page = this.element('div', '交换');
         const note = document.createElement('p');
-        note.textContent = '导出：选好范围后下载，或写入下方文本框再复制；导出前会先应用未提交的改动，复现链接始终只含本次改动。导入：把 JSON 粘贴到文本框后点“导入文本”，或直接从文件导入，参数进入本次会话。';
+        note.textContent = '导出：选好范围后下载，或写入文本框再复制；导出前会先应用未提交的改动，复现链接始终只含本次改动。导入：从文件导入，或把 JSON 粘贴到文本框后点“导入文本”，参数进入本次会话。';
         page.appendChild(note);
         const scopes = document.createElement('fieldset'); scopes.className = '范围';
         const legend = document.createElement('legend'); legend.textContent = '导出范围'; scopes.appendChild(legend);
@@ -548,7 +543,11 @@ export class ConfigDebugPanel {
             text.append(title, detail); item.append(radio, text); scopes.appendChild(item);
         }
         page.appendChild(scopes);
-        // 导出操作紧跟导出范围：最常用的下载在首位；写入文本框与复现链接的结果出现在紧邻的文本框中。
+        const heading = document.createElement('h4'); heading.className = '小节'; heading.textContent = '文本内容'; page.appendChild(heading);
+        this.text = document.createElement('textarea'); this.text.maxLength = CONFIG_TEXT_LIMIT;
+        this.text.placeholder = '导出的 JSON 或复现链接显示在此；也可在此粘贴配置 JSON 后导入';
+        this.text.setAttribute('aria-label', '配置导入导出内容'); page.appendChild(this.text);
+        // 两行按钮都在文本框下方：第一行导出，第二行导入与复制；最常用的下载与从文件导入在各行首位。
         const output = this.element('div', '按钮组'); page.appendChild(output);
         output.appendChild(this.button('下载 JSON', () => this.run(() => { this.apply(); this.download(); }), '主'));
         output.appendChild(this.button('导出到文本框', () => this.run(() => this.exportText(this.exportScope))));
@@ -556,19 +555,14 @@ export class ConfigDebugPanel {
             this.apply(); this.text!.value = this.session.shareURL(); this.report('链接已生成，只携带相对项目参数的改动；打开后按目标值启动');
         }));
         link.title = '始终只含本次改动，与所选导出范围无关'; output.appendChild(link);
-        const heading = document.createElement('h4'); heading.className = '小节'; heading.textContent = '文本内容'; page.appendChild(heading);
-        this.text = document.createElement('textarea'); this.text.maxLength = CONFIG_TEXT_LIMIT;
-        this.text.placeholder = '导出的 JSON 或复现链接显示在此；也可在此粘贴配置 JSON 后导入';
-        this.text.setAttribute('aria-label', '配置导入导出内容'); page.appendChild(this.text);
-        // 文本框操作紧贴文本框：复制导出结果、导入粘贴内容；从文件导入与之同属导入。
         const input = this.element('div', '按钮组'); page.appendChild(input);
-        input.appendChild(this.button('复制文本', () => this.copy()));
-        input.appendChild(this.button('导入文本', () => this.run(() => this.reportImport(this.session.store.importDocument(this.text!.value), 'JSON 已导入'))));
         const file = document.createElement('label'); file.className = '文件'; file.textContent = '从文件导入';
         const upload = document.createElement('input'); upload.type = 'file'; upload.accept = '.json,application/json';
         upload.setAttribute('aria-label', '从文件导入配置 JSON');
         upload.addEventListener('change', () => this.readFile(upload));
         file.appendChild(upload); input.appendChild(file);
+        input.appendChild(this.button('导入文本', () => this.run(() => this.reportImport(this.session.store.importDocument(this.text!.value), 'JSON 已导入'))));
+        input.appendChild(this.button('复制文本', () => this.copy()));
         return page;
     }
 
@@ -690,7 +684,7 @@ export class ConfigDebugPanel {
         this.check(row, snapshot);
         const changed = this.refreshProblems(); changed.add(row);
         changed.forEach(item => this.refreshRow(item, snapshot)); this.refreshCounts(snapshot);
-        if (this.conditionKeys.has(row.key)) this.filter();
+        if (this.hasConditions) this.filter();
     }
 
     /** 试算全部可读的未应用输入合并后的校验结果，把问题分配到涉及的参数；返回问题有变化的行。 */
@@ -715,14 +709,19 @@ export class ConfigDebugPanel {
         return changed;
     }
 
-    /** 显示条件按当前输入判断：条件参数有可读的未应用输入时用输入值，否则用目标值。 */
-    private conditionMet(row: FieldRow, snapshot: ConfigSnapshot): boolean {
-        return (row.field.showWhen || []).every(condition => {
-            const source = this.rowIndex.get(condition.key);
-            let value: ConfigValue = snapshot.desired[condition.key];
-            if (source && source.dirty && !source.invalid) { try { value = source.control.read(); } catch { /* 保持目标值 */ } }
-            return condition.values.some(item => configEqual(item, value));
-        });
+    /** 显示条件使用的当前值：可读的未应用输入优先，其余为目标值。 */
+    private currentValues(snapshot: ConfigSnapshot): ConfigRecord {
+        const values: Record<string, ConfigValue> = { ...snapshot.desired };
+        for (const row of this.rows) {
+            if (row.dirty && !row.invalid) { try { values[row.key] = row.control.read(); } catch { /* 保持目标值 */ } }
+        }
+        return Object.freeze(values);
+    }
+
+    /** 判断显示条件；条件函数出错时按显示处理，避免参数无法找到。 */
+    private conditionMet(row: FieldRow, values: ConfigRecord): boolean {
+        if (!row.field.showWhen) return true;
+        try { return row.field.showWhen(values) === true; } catch { return true; }
     }
 
     /** 比较控件与目标值，更新未应用和非法状态。 */
@@ -740,7 +739,7 @@ export class ConfigDebugPanel {
         this.refreshProblems();
         for (const row of this.rows) this.refreshRow(row, snapshot);
         this.refreshCounts(snapshot);
-        if (this.view.kind === 'changed' || this.query() || this.conditionKeys.size) this.filter();
+        if (this.view.kind === 'changed' || this.query() || this.hasConditions) this.filter();
     }
 
     /** 刷新行标记与元信息：生效时机、非默认来源、未应用、待重启及范围。 */
@@ -751,13 +750,12 @@ export class ConfigDebugPanel {
         row.element.classList.toggle('非法', wrong);
         row.problem.textContent = row.problems.join('\n'); row.problem.hidden = !row.problems.length;
         const marks: [string, string][] = [[field.timing || '重启', field.timing === '实时' ? '实时' : '重启']];
-        if (field.locked) marks.push(['锁定', '锁定']);
         if (source !== '默认') marks.push([source, '来源']);
         if (pending) marks.push(['待重启', '待重启']);
         if (row.dirty) marks.push(row.invalid ? ['输入有误', '输入有误'] : ['未应用', '未应用']);
         if (!row.invalid && row.problems.length) marks.push(['有误', '有误']);
         row.marks.replaceChildren(...marks.map(([text, className]) => { const tag = this.element('span', className); tag.textContent = text; return tag; }));
-        row.restore.classList.toggle('隐藏', !!field.locked || (!row.dirty && configEqual(snapshot.desired[key], field.defaultValue)));
+        row.restore.classList.toggle('隐藏', !row.dirty && configEqual(snapshot.desired[key], field.defaultValue));
         const keyButton = this.button(key, () => this.copyKey(key), '键'); keyButton.title = '点击复制参数键';
         const items: HTMLElement[] = [keyButton];
         const limits = field.kind === '数值' || field.kind === '向量' ? field : null;
@@ -767,9 +765,6 @@ export class ConfigDebugPanel {
         else if (limits?.integer) items.push(this.metaItem('取值', '整数'));
         if (field.kind === '文本' && field.maxLength !== undefined) items.push(this.metaItem('最长', field.maxLength + ' 字'));
         if (field.kind !== '数据') items.push(this.metaItem('默认', formatValue(field.defaultValue) + (field.unit ? ' ' + field.unit : '')));
-        if (field.showWhen) items.push(this.metaItem('显示条件', field.showWhen.map(condition =>
-            (this.rowIndex.get(condition.key)?.field.label || condition.key) + ' 为 ' + condition.values.map(formatValue).join(' / ')).join('，')));
-        if (field.locked) items.push(this.metaItem('锁定', '只能在项目配置中修改'));
         if (pending) items.push(this.metaItem('本局仍为', formatValue(snapshot.active[key]), '运行'));
         row.note.replaceChildren(...items);
     }
@@ -856,7 +851,7 @@ export class ConfigDebugPanel {
         }
         this.refreshProblems().forEach(row => this.refreshRow(row, snapshot));
         this.refreshCounts(snapshot);
-        if (this.view.kind === 'changed' || this.conditionKeys.size) this.filter();
+        if (this.view.kind === 'changed' || this.hasConditions) this.filter();
         this.report('已撤销 ' + count + ' 项未应用的输入');
     }
 
@@ -942,12 +937,13 @@ export class ConfigDebugPanel {
         if (!this.list) return;
         const query = this.query(), view = this.view, snapshot = this.session.store.snapshot(), visible = new Set<GroupNode>();
         const crossGroup = !!query || view.kind === 'changed';
+        const values = this.hasConditions ? this.currentValues(snapshot) : snapshot.desired;
         let conditional = 0;
         for (const row of this.rows) {
             const match = query ? row.search.indexOf(query) !== -1
                 : view.kind === 'changed' ? this.changed(row, snapshot) : row.node === view.node;
             // “已修改”汇总始终列出改动，其余视图隐藏未满足显示条件的参数。
-            const show = match && (view.kind === 'changed' || this.conditionMet(row, snapshot));
+            const show = match && (view.kind === 'changed' || this.conditionMet(row, values));
             if (match && !show) conditional++;
             row.element.hidden = !show;
             if (show) visible.add(row.node);

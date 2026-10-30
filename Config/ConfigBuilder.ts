@@ -1,19 +1,22 @@
 import { ConfigCondition, ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
+/** 合并两个显示条件，须同时满足；任一为空时取另一个。 */
+function bothConditions(a: ConfigCondition | undefined, b: ConfigCondition | undefined): ConfigCondition | undefined {
+    return a && b ? values => a(values) && b(values) : a || b;
+}
+
 /** 定义节点在声明阶段收集的公共属性；未设置的项为 undefined。 */
 export interface ConfigNodeInfo {
     readonly label: string | undefined;
     readonly description: string | undefined;
     readonly timing: ConfigTiming | undefined;
-    readonly showWhen: readonly ConfigCondition[];
-    readonly locked: boolean;
+    readonly showWhen: ConfigCondition | undefined;
 }
 
-/** 从上级分组继承的属性：生效时机取最近的声明，显示条件逐级累加，锁定任一级即生效。 */
+/** 从上级分组继承的属性：生效时机取最近的声明，显示条件逐级须同时满足。 */
 export interface ConfigInherited {
     readonly timing?: ConfigTiming;
-    readonly showWhen?: readonly ConfigCondition[];
-    readonly locked?: boolean;
+    readonly showWhen?: ConfigCondition;
 }
 
 /**
@@ -24,8 +27,7 @@ export abstract class ConfigNodeBuilder {
     private text: string | undefined;
     private note: string | undefined;
     private timingValue: ConfigTiming | undefined;
-    private conditions: ConfigCondition[] = [];
-    private lockedValue = false;
+    private condition: ConfigCondition | undefined;
 
     /** 设置面板标题；省略时使用键名。 */
     label(text: string): this { this.text = text; return this; }
@@ -36,21 +38,18 @@ export abstract class ConfigNodeBuilder {
     /** 保存后重新启动生效（未声明时的默认）；用于分组时作为组内参数的默认时机。 */
     restart(): this { this.timingValue = '重启'; return this; }
     /**
-     * 面板中仅当参数 key（完整扁平键）的值等于 values 之一时显示，省略 values 表示等于 true；
+     * 面板中仅当 condition 返回 true 时显示，参数为以完整扁平键索引的当前值，如 v => v['debug.bounds'] === true；
      * 多次调用需全部满足，用于分组时作用于组内全部参数。只影响面板，不影响取值。
      */
-    showWhen(key: string, ...values: ConfigValue[]): this { this.conditions.push({ key, values: values.length ? values : [true] }); return this; }
-    /** 锁定：只能由默认值或项目配置决定，测试保存、复现链接与面板不能覆盖；用于分组时锁定组内全部参数。 */
-    locked(): this { this.lockedValue = true; return this; }
+    showWhen(condition: ConfigCondition): this { this.condition = bothConditions(this.condition, condition); return this; }
     /** 读取已声明的公共属性。 */
     info(): ConfigNodeInfo {
-        return { label: this.text, description: this.note, timing: this.timingValue, showWhen: this.conditions.slice(), locked: this.lockedValue };
+        return { label: this.text, description: this.note, timing: this.timingValue, showWhen: this.condition };
     }
 
     /** 合并上级继承属性与本节点声明，供下级节点继续继承。 */
     inherit(parent: ConfigInherited = {}): ConfigInherited {
-        const showWhen = (parent.showWhen || []).concat(this.conditions);
-        return { timing: this.timingValue ?? parent.timing, showWhen, locked: !!parent.locked || this.lockedValue };
+        return { timing: this.timingValue ?? parent.timing, showWhen: bothConditions(parent.showWhen, this.condition) };
     }
 }
 
@@ -70,8 +69,7 @@ export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuil
         if (own.description !== undefined) info.description = own.description;
         if (resolved.timing !== undefined) info.timing = resolved.timing;
         if (this.unitText !== undefined) info.unit = this.unitText;
-        if (resolved.showWhen && resolved.showWhen.length) info.showWhen = resolved.showWhen;
-        if (resolved.locked) info.locked = true;
+        if (resolved.showWhen) info.showWhen = resolved.showWhen;
         return this.create(info);
     }
     /** 由具体类型生成字段。 */

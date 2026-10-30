@@ -14,14 +14,11 @@ export type ConfigReadonly<T> = ConfigValue extends T ? ConfigReadonlyValue
 /** 以扁平键索引的只读配置值。 */
 export type ConfigRecord = Readonly<Record<string, ConfigValue>>;
 
+/** 字段显示条件：根据以扁平键索引的当前值判断是否显示。 */
+export type ConfigCondition = (values: ConfigRecord) => boolean;
+
 /** 参数的生效时机；涉及初始场地、刚体结构等参数默认在重启后生效。 */
 export type ConfigTiming = '实时' | '重启';
-
-/** 字段显示条件：参数 key 的值等于 values 之一时满足；面板按当前输入判断。 */
-export interface ConfigCondition {
-    readonly key: string;
-    readonly values: readonly ConfigValue[];
-}
 
 /** 参数在测试面板中的中文说明；group 为所属分组的键路径（分组身份），不是显示标题。 */
 export interface ConfigDescription {
@@ -31,10 +28,11 @@ export interface ConfigDescription {
     timing?: ConfigTiming;
     /** 显示单位，如 m/s、秒；只用于面板显示。 */
     unit?: string;
-    /** 面板显示条件，全部满足时显示；只影响面板，不影响取值、校验与导出。 */
-    showWhen?: readonly ConfigCondition[];
-    /** 锁定：只由默认值或项目层决定，本地与会话层（本机保存、复现链接、面板）不能覆盖。 */
-    locked?: boolean;
+    /**
+     * 面板显示条件：参数为以扁平键索引的当前值（面板中含可读的未应用输入），返回 true 时显示。
+     * 只影响面板，不影响取值、校验与导出；抛出异常时按显示处理。
+     */
+    showWhen?: ConfigCondition;
 }
 
 /** 分组声明：key 为分组在定义树中的键路径，作为稳定身份与层级依据；label 只用于显示。 */

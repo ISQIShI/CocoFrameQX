@@ -104,7 +104,7 @@ export class ConfigDefinition<T extends ConfigTree> {
     /** 开始链式启动配置，项目标识与版本用于缓存隔离和文档校验。 */
     setup(project: string, version: number): ConfigSetup<T> { return new ConfigSetup<T>(this, project, version); }
 
-    /** 递归展开定义树：group 为最近分组的键路径，inherited 为上级分组的生效时机、显示条件与锁定；分组按出现顺序登记。 */
+    /** 递归展开定义树：group 为最近分组的键路径，inherited 为上级分组的生效时机与显示条件；分组按出现顺序登记。 */
     private flatten(node: ConfigTree, path: readonly string[], group: string | undefined, inherited: ConfigInherited,
         schema: ConfigSchema, groups: ConfigGroupInfo[]): void {
         for (const name of Object.keys(node)) {
