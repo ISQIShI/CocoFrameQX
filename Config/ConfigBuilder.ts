@@ -1,10 +1,19 @@
-import { ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
+import { ConfigCondition, ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
 /** 定义节点在声明阶段收集的公共属性；未设置的项为 undefined。 */
 export interface ConfigNodeInfo {
     readonly label: string | undefined;
     readonly description: string | undefined;
     readonly timing: ConfigTiming | undefined;
+    readonly showWhen: readonly ConfigCondition[];
+    readonly locked: boolean;
+}
+
+/** 从上级分组继承的属性：生效时机取最近的声明，显示条件逐级累加，锁定任一级即生效。 */
+export interface ConfigInherited {
+    readonly timing?: ConfigTiming;
+    readonly showWhen?: readonly ConfigCondition[];
+    readonly locked?: boolean;
 }
 
 /**
@@ -15,6 +24,8 @@ export abstract class ConfigNodeBuilder {
     private text: string | undefined;
     private note: string | undefined;
     private timingValue: ConfigTiming | undefined;
+    private conditions: ConfigCondition[] = [];
+    private lockedValue = false;
 
     /** 设置面板标题；省略时使用键名。 */
     label(text: string): this { this.text = text; return this; }
@@ -24,22 +35,43 @@ export abstract class ConfigNodeBuilder {
     live(): this { this.timingValue = '实时'; return this; }
     /** 保存后重新启动生效（未声明时的默认）；用于分组时作为组内参数的默认时机。 */
     restart(): this { this.timingValue = '重启'; return this; }
+    /**
+     * 面板中仅当参数 key（完整扁平键）的值等于 values 之一时显示，省略 values 表示等于 true；
+     * 多次调用需全部满足，用于分组时作用于组内全部参数。只影响面板，不影响取值。
+     */
+    showWhen(key: string, ...values: ConfigValue[]): this { this.conditions.push({ key, values: values.length ? values : [true] }); return this; }
+    /** 锁定：只能由默认值或项目配置决定，测试保存、复现链接与面板不能覆盖；用于分组时锁定组内全部参数。 */
+    locked(): this { this.lockedValue = true; return this; }
     /** 读取已声明的公共属性。 */
-    info(): ConfigNodeInfo { return { label: this.text, description: this.note, timing: this.timingValue }; }
+    info(): ConfigNodeInfo {
+        return { label: this.text, description: this.note, timing: this.timingValue, showWhen: this.conditions.slice(), locked: this.lockedValue };
+    }
+
+    /** 合并上级继承属性与本节点声明，供下级节点继续继承。 */
+    inherit(parent: ConfigInherited = {}): ConfigInherited {
+        const showWhen = (parent.showWhen || []).concat(this.conditions);
+        return { timing: this.timingValue ?? parent.timing, showWhen, locked: !!parent.locked || this.lockedValue };
+    }
 }
 
 /** 链式字段构建器：在声明阶段收集属性，由配置定义统一生成字段；运行时读取不经过构建器。 */
 export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuilder {
     /** 仅供类型推导的取值类型标记，运行时不存在。 */
     declare readonly valueType: V;
+    private unitText: string | undefined;
 
-    /** 生成字段声明；group 为所在分组的键路径，timing 为继承的生效时机，省略标题时使用键名。 */
-    build(key: string, group?: string, timing?: ConfigTiming): ConfigField {
-        const own = this.info(), info: ConfigDescription = { label: own.label || key };
+    /** 设置显示单位，如 'm/s'、'秒'；只用于面板显示，不做换算。 */
+    unit(text: string): this { this.unitText = text; return this; }
+
+    /** 生成字段声明；group 为所在分组的键路径，parent 为上级分组继承的属性，省略标题时使用键名。 */
+    build(key: string, group?: string, parent?: ConfigInherited): ConfigField {
+        const own = this.info(), resolved = this.inherit(parent), info: ConfigDescription = { label: own.label || key };
         if (group) info.group = group;
         if (own.description !== undefined) info.description = own.description;
-        const resolved = own.timing ?? timing;
-        if (resolved !== undefined) info.timing = resolved;
+        if (resolved.timing !== undefined) info.timing = resolved.timing;
+        if (this.unitText !== undefined) info.unit = this.unitText;
+        if (resolved.showWhen && resolved.showWhen.length) info.showWhen = resolved.showWhen;
+        if (resolved.locked) info.locked = true;
         return this.create(info);
     }
     /** 由具体类型生成字段。 */

@@ -17,12 +17,24 @@ export type ConfigRecord = Readonly<Record<string, ConfigValue>>;
 /** 参数的生效时机；涉及初始场地、刚体结构等参数默认在重启后生效。 */
 export type ConfigTiming = '实时' | '重启';
 
+/** 字段显示条件：参数 key 的值等于 values 之一时满足；面板按当前输入判断。 */
+export interface ConfigCondition {
+    readonly key: string;
+    readonly values: readonly ConfigValue[];
+}
+
 /** 参数在测试面板中的中文说明；group 为所属分组的键路径（分组身份），不是显示标题。 */
 export interface ConfigDescription {
     label: string;
     group?: string;
     description?: string;
     timing?: ConfigTiming;
+    /** 显示单位，如 m/s、秒；只用于面板显示。 */
+    unit?: string;
+    /** 面板显示条件，全部满足时显示；只影响面板，不影响取值、校验与导出。 */
+    showWhen?: readonly ConfigCondition[];
+    /** 锁定：只由默认值或项目层决定，本地与会话层（本机保存、复现链接、面板）不能覆盖。 */
+    locked?: boolean;
 }
 
 /** 分组声明：key 为分组在定义树中的键路径，作为稳定身份与层级依据；label 只用于显示。 */
@@ -104,11 +116,35 @@ export interface ConfigDocument {
     values: Record<string, ConfigValue>;
 }
 
+/** 校验问题：message 为中文说明，keys 为涉及的参数键（可为空），面板据此把问题显示在对应字段旁。 */
+export interface ConfigIssue {
+    readonly message: string;
+    readonly keys: readonly string[];
+}
+
+/** 校验函数的返回项：纯文本（不定位到字段）或带涉及参数键的问题。 */
+export type ConfigIssueInput = string | { readonly message: string; readonly keys?: readonly string[] };
+
+/** 声明涉及若干参数键的校验问题，例如 configIssue('最小值不能大于最大值', 'launch.min', 'launch.max')。 */
+export function configIssue(message: string, ...keys: string[]): ConfigIssue { return { message, keys }; }
+
+/** 把校验返回项统一为带键列表的问题。 */
+export function toConfigIssue(input: ConfigIssueInput): ConfigIssue {
+    return typeof input === 'string' ? { message: input, keys: [] } : { message: input.message, keys: input.keys ? input.keys.slice() : [] };
+}
+
 /** 配置校验或输入格式错误；一次提交失败不会留下部分参数。 */
 export class ConfigError extends Error {
-    /** 保存中文错误明细，供面板和自动化验证使用。 */
-    constructor(public readonly issues: readonly string[]) {
-        super(issues.join('\n'));
+    /** 中文错误文本，供提示和自动化验证使用。 */
+    readonly issues: readonly string[];
+    /** 带涉及参数键的错误明细，供面板定位字段。 */
+    readonly details: readonly ConfigIssue[];
+    /** 接受纯文本或带参数键的问题。 */
+    constructor(issues: readonly ConfigIssueInput[]) {
+        const details = issues.map(toConfigIssue);
+        super(details.map(item => item.message).join('\n'));
         this.name = 'ConfigError';
+        this.details = details;
+        this.issues = details.map(item => item.message);
     }
 }

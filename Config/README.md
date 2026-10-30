@@ -76,13 +76,14 @@ tools?.mount();                 // 游戏就绪后挂载面板；无 DOM 时返�
 tools?.session?.save();         // 会话与面板在启动后可用（panel: false 时只有会话）
 ```
 
-- 字段方法：`label` 标题（省略时用键名）、`describe` 说明、`live` 实时 / `restart` 重启（默认）、数值与向量的 `range / min / max / int / step`、文本的 `maxLength`。
+- 字段方法：`label` 标题（省略时用键名）、`describe` 说明、`live` 实时 / `restart` 重启（默认）、`unit` 显示单位、`showWhen(键, ...取值)` 面板显示条件、`locked` 锁定、数值与向量的 `range / min / max / int / step`、文本的 `maxLength`。
+- `showWhen('debug.bounds')` 表示该参数为 true 时才在面板显示，`showWhen('mode', '困难', '地狱')` 为等于其一时显示；多次调用须全部满足，只影响面板。`locked()` 的参数只能由默认值或项目配置决定，本机保存、复现链接与面板都不能覆盖（导入时跳过并提示）。分组也可用 `showWhen / locked`，作用于组内全部参数。
 - 分组是与字段同类的定义节点：`group({ … }).label(标题).describe(说明).live()`，或简写 `group(标题, { … })`；省略标题时用键名。分组上的 `live()/restart()` 是组内默认生效时机，字段或更近的分组自行声明时优先。
 - 分组身份与层级取自它在定义树中的**键路径**（如 `animals.1`），标题只用于显示，可含任意字符、可与其他分组同名；字段的 `group` 存所属分组键路径。普通嵌套对象只扩展键路径、不形成分组。键名不能含点号。
 - `definition.groups` 列出分组（键、标题、说明）；容器 `store.groups()` 另带 `parent`（键路径前缀中最近的分组），面板目录据此建立。分组只是显示元数据，不参与取值、分层与导出。
 - 扁平键由路径拼接，如 `launch.minSpeed`、`animals.1.radius`；JSON、面板、`store.get` 都使用扁平键。
 - 子组可以由程序生成，例如按等级循环创建 `group(名称, {...})` 放入 `Record<string, …>`，读取时 `values.animals[level].radius`；面板中按 `animals.<等级>` 区分，同名也不会合并。
-- 跨字段校验函数收到嵌套值 `v` 与全部扁平值 `flat`（含扩展字段），返回中文问题列表；必须是纯检查。
+- 跨字段校验函数收到嵌套值 `v` 与全部扁平值 `flat`（含扩展字段），返回中文问题列表；必须是纯检查。问题可写成 `configIssue('最小发射速度不能大于最大速度', 'launch.minSpeed', 'launch.maxSpeed')`，面板会在输入时把它显示在这些参数旁；纯文本问题只在底部汇总。
 - `start()` 的固定顺序：合并字段 → 创建容器 → 项目层 → 各插件 `beforeStart`（如恢复本地与链接） → 锁定重启参数 → 接入定义 → 应用扩展 → 订阅 → 各插件 `afterStart`（如创建面板）。任一步失败会撤销已完成的接入（含已启动插件的 `dispose`）后抛出。
 - 插件 `ConfigPlugin { beforeStart?(store), afterStart?(store), dispose?() }`：`beforeStart` 可写本地或会话层并返回提示（并入 `runtime.warnings`），`dispose` 在释放时按注册逆序调用。`.use(null)` 被忽略，便于按开关传入。扩展（如绑定器）负责“补充字段并写入目标”，插件负责“在启动流程中附加行为”。
 - 同一定义同一时刻只能接入一个运行容器；第二个入口启动会报错，不会污染当前值。
@@ -147,7 +148,8 @@ GAME.setup('项目', 1).extend(scene)…start();
 1. 打开 Web 测试包（HTTP/HTTPS），点击右上角“测试参数”。从分组目录逐级进入末级分组，或直接搜索标题、分组或参数键；分组页可用上一组/下一组在同级之间切换。
 2. 修改后点击底部“应用 N 项改动”，只提交改动过的字段；每行标出值来自默认、项目、本地还是会话。没有改动时提示“没有改动”。
 3. 实时字段按业务接入逻辑生效；重启字段需“保存到本机”后刷新页面。
-4. “导入导出”页先选导出范围（本次改动 `改动` / 项目配置 `非默认` / 全部参数 `全部`），“导出到文本框”与“下载 JSON”按所选范围输出；复现链接与保存到本机固定为 `改动`；导入支持粘贴文本或选择文件，跳过的内容会列在状态栏。
+4. “导入导出”页先选导出范围（本次改动 `改动` / 项目配置 `非默认` / 全部参数 `全部`），其下“下载 JSON”“导出到文本框”按所选范围输出，“生成复现链接”固定为 `改动`（保存到本机同样）；文本框下方“复制文本”“导入文本”“从文件导入”，跳过的内容会列在状态栏。
+   输入时面板即试算校验，越界或跨字段冲突以红字显示在相关参数行内。
 5. “生成复现链接”携带改动，可复制给程序或其他测试人员。配置过大时改传 JSON。
 6. “恢复项目参数”清除本地/本次覆盖，保留包内项目层；它不立即重建当前局。若地址仍带 qxValues，需要移除该参数或换新链接。
 
@@ -158,7 +160,7 @@ GAME.setup('项目', 1).extend(scene)…start();
 - 是否接入由项目决定：正式版本不创建 `ConfigTestTools`（不 `.use`），核心不会读取测试缓存或 URL，不创建面板；项目配置照常使用。`ConfigTestSession` 创建即启用，也可不经插件直接搭配自定义界面使用。
 - 测试工具不请求远端配置，配置字符串仅作为数据解析。
 - 核心适用于 Web、原生及纯逻辑测试。Web 面板依赖 DOM、Shadow DOM 和文件下载能力；原生/无 DOM 环境不会创建它。可将 `sys.localStorage` 通过 `storage` 传入。
-- 发布开销：不接入工具时运行时零开销（不构造会话或面板）。包体方面核心不再引用工具，只引用核心的项目不会打入 `Tools/`；若入口脚本仍静态导入 `ConfigTestTools`（如 AnimalMerge 的 GameController），工具代码（面板未压缩约 35 KB）仍会进入包体，需要剔除时把创建工具的代码放到只在测试包启用的独立脚本中。
+- 发布开销：不接入工具时运行时零开销（不构造会话或面板）。包体方面，Cocos 构建会把 `assets` 下全部脚本打入包体，不论是否被引用，因此 `Tools/` 始终在包内（三模块压缩后约 41.6 KB，gzip 约 14.7 KB），只移动创建代码无法剔除。需要剔除时可把 `Tools/` 设为 Asset Bundle，并在正式构建的 Bundle 配置中设为不输出，测试包运行时加载后再接入。
 - 面板内的触摸、鼠标和键盘事件停止冒泡。若项目在 window/document 捕获阶段监听输入，必须用面板选项 `onVisibilityChange` 协调输入暂停。
 
 ## 9. 常用 API
@@ -170,6 +172,7 @@ GAME.setup('项目', 1).extend(scene)…start();
 | 合并少量覆盖 | `store.patchLayer('会话', { 'launch.minSpeed': 12 })`，返回 `{ changed, deferred }` |
 | 替换覆盖层，空对象撤销 | `store.replaceLayer('会话', {})` / `store.replaceLayers({ 本地: {}, 会话: {} })` |
 | 导入 / 导出 | `store.importDocument(json)` 返回跳过提示；`store.exportJSON('改动' / '非默认' / '全部')` |
+| 试算校验（不修改） | `store.check('会话', { 键: 值 })` 返回 `{ message, keys }[]`；提交失败的 `ConfigError.details` 同样带涉及键 |
 | 观察成功提交 | `store.subscribe(listener)` 或 `setup.onChange(listener)` |
 | 接入附加功能 | `setup.use(plugin)`；测试工具 `new ConfigTestTools(options)`，启动后 `tools.session / tools.panel / tools.mount()` |
 | 保存、恢复、重置、分享（工具） | `tools.session.save / reset / shareURL`（恢复由插件在启动前完成） |

@@ -1,4 +1,4 @@
-import { ConfigNodeBuilder, FieldBuilder } from './ConfigBuilder';
+import { ConfigInherited, ConfigNodeBuilder, FieldBuilder } from './ConfigBuilder';
 import { ConfigError, ConfigGroupInfo, ConfigReadonly, ConfigSchema, ConfigTiming, ConfigValue } from './ConfigTypes';
 import { ConfigSetup } from './ConfigSetup';
 
@@ -72,7 +72,7 @@ export class ConfigDefinition<T extends ConfigTree> {
     /** 展开定义树并生成默认快照与读取视图；键名冲突或空键在此报错。 */
     constructor(readonly tree: T, private readonly options: ConfigDefinitionOptions = {}) {
         const schema: ConfigSchema = Object.create(null), groups: ConfigGroupInfo[] = [];
-        this.flatten(tree, [], undefined, undefined, schema, groups);
+        this.flatten(tree, [], undefined, {}, schema, groups);
         this.schema = Object.freeze(schema);
         this.groups = Object.freeze(groups.map(item => Object.freeze(item)));
         this.defaults = this.read(this.fallback);
@@ -104,14 +104,14 @@ export class ConfigDefinition<T extends ConfigTree> {
     /** 开始链式启动配置，项目标识与版本用于缓存隔离和文档校验。 */
     setup(project: string, version: number): ConfigSetup<T> { return new ConfigSetup<T>(this, project, version); }
 
-    /** 递归展开定义树：group 为最近分组的键路径，timing 为继承的生效时机；分组按出现顺序登记。 */
-    private flatten(node: ConfigTree, path: readonly string[], group: string | undefined, timing: ConfigTiming | undefined,
+    /** 递归展开定义树：group 为最近分组的键路径，inherited 为上级分组的生效时机、显示条件与锁定；分组按出现顺序登记。 */
+    private flatten(node: ConfigTree, path: readonly string[], group: string | undefined, inherited: ConfigInherited,
         schema: ConfigSchema, groups: ConfigGroupInfo[]): void {
         for (const name of Object.keys(node)) {
             if (!name || name.indexOf('.') !== -1) throw new ConfigError(['定义键不能为空或包含点号：' + path.concat(name).join('.')]);
             const child = node[name], childPath = path.concat(name), key = childPath.join('.');
             if (child instanceof FieldBuilder) {
-                const field = child.build(name, group, timing);
+                const field = child.build(name, group, inherited);
                 const note = this.options.timingNotes?.[field.timing || '重启'];
                 if (field.description === undefined && note !== undefined) field.description = note;
                 schema[key] = field;
@@ -121,8 +121,8 @@ export class ConfigDefinition<T extends ConfigTree> {
                 const info = child.info(), entry: ConfigGroupInfo = { key, label: info.label || name };
                 if (info.description !== undefined) entry.description = info.description;
                 groups.push(entry);
-                this.flatten(child.children, childPath, key, info.timing ?? timing, schema, groups);
-            } else if (child && typeof child === 'object') this.flatten(child as ConfigTree, childPath, group, timing, schema, groups);
+                this.flatten(child.children, childPath, key, child.inherit(inherited), schema, groups);
+            } else if (child && typeof child === 'object') this.flatten(child as ConfigTree, childPath, group, inherited, schema, groups);
             else throw new ConfigError(['定义节点必须是字段、分组或普通对象：' + key]);
         }
     }

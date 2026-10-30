@@ -15,6 +15,8 @@ export interface ConfigBindOptions extends NumberLimits {
     maxLength?: number;
     timing?: ConfigTiming;
     description?: string;
+    /** 显示单位，只用于面板。 */
+    unit?: string;
 }
 
 /** 支持写入位置的节点最小接口，不依赖引擎类型。 */
@@ -149,10 +151,12 @@ export class ConfigBinderScope {
         return { ...this.info(label, options), ...this.limits(options), kind: '向量', defaultValue: initial, components };
     }
 
-    /** 合成标题、分组、生效时机与说明，单项选项优先于绑定器默认值。 */
+    /** 合成标题、分组、生效时机、说明与单位，单项选项优先于绑定器默认值。 */
     private info(label: string, options: ConfigBindOptions): ConfigDescription {
         const defaults = this.binder.options;
-        return { label, group: this.group, timing: options.timing ?? defaults.timing ?? '重启', description: options.description ?? defaults.description };
+        const info: ConfigDescription = { label, group: this.group, timing: options.timing ?? defaults.timing ?? '重启', description: options.description ?? defaults.description };
+        if (options.unit !== undefined) info.unit = options.unit;
+        return info;
     }
 
     /** 只取数值约束字段。 */

@@ -1,4 +1,4 @@
-import { ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
+import { ConfigError, ConfigExportScope, ConfigField, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
 import { ConfigTestSession, message } from './ConfigTestSession';
 import { CONFIG_TEXT_LIMIT, ConfigSnapshot, configEqual } from '../ConfigStore';
 
@@ -18,6 +18,8 @@ interface GroupNode {
 interface FieldRow {
     key: string; field: ConfigField; node: GroupNode; search: string;
     element: HTMLDivElement; control: FieldControl; marks: HTMLSpanElement; note: HTMLDivElement; restore: HTMLButtonElement;
+    /** 问题文本区；problems 为试算校验中涉及本字段的问题（单字段或跨字段）。 */
+    problem: HTMLParagraphElement; problems: string[];
     dirty: boolean; invalid: boolean;
 }
 
@@ -100,7 +102,10 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.参数.非法 .文字::before{background:var(--错)}' +
     '.标记{display:inline-flex;flex-wrap:wrap;gap:4px}.标记 span{color:var(--次);background:var(--浮)}' +
     '.标记 .实时{color:var(--实时);background:var(--实时底)}.标记 .重启{color:var(--重启);background:var(--重启底)}' +
-    '.标记 .输入有误{color:var(--错);background:var(--错底)}' +
+    '.标记 .输入有误,.标记 .有误,.计数 .有误{color:var(--错);background:var(--错底)}.标记 .锁定{color:var(--次);background:var(--浮)}' +
+    '.问题{margin:0;font-size:12px;line-height:1.55;color:var(--错);white-space:pre-wrap;overflow-wrap:anywhere}' +
+    '.单位{flex:none;font-size:12px;color:var(--弱);white-space:nowrap}.参数.锁定 .控件{opacity:.6}' +
+    '.条件提示{padding:10px 4px 0;font-size:12px;color:var(--弱)}' +
     '.详情{grid-column:1/-1;display:flex;flex-direction:column;gap:3px;min-width:0}' +
     '.描述{margin:0;font-size:12px;line-height:1.55;color:var(--次);overflow-wrap:anywhere}' +
     '.元{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 14px;font-size:11.5px;color:var(--弱)}' +
@@ -128,13 +133,14 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.范围 label{display:grid;grid-template-columns:18px minmax(0,1fr);gap:8px;align-items:start;padding:8px 12px;cursor:pointer;border-top:1px solid var(--线)}' +
     '.范围 legend+label{border-top:none}.范围 label:hover{background:var(--浮)}.范围 input{margin:2px 0 0;accent-color:var(--主)}' +
     '.范围 b{display:block;font-weight:600}.范围 span span{display:block;font-size:11.5px;color:var(--弱);line-height:1.5}' +
-    '.按钮组{display:grid;grid-template-columns:repeat(auto-fill,minmax(124px,1fr));gap:8px;margin:12px 0}' +
+    '.按钮组{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0 16px}.按钮组>*{white-space:normal;text-align:center;line-height:1.35}' +
+    '.小节{margin:4px 0 6px;font-size:12px;font-weight:600;color:var(--次)}' +
     '.文件{display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--面);border:1px solid var(--线强);border-radius:7px;padding:6px 12px}' +
     '.文件:hover{background:var(--浮)}.文件 input{display:none}' +
     '.底部{flex:none;padding:10px 12px calc(12px + env(safe-area-inset-bottom,0px));border-top:1px solid var(--线);background:var(--面)}' +
     '.摘要{display:flex;flex-wrap:wrap;gap:4px 12px;margin-bottom:4px;font-size:12px;color:var(--次)}' +
     '.摘要 b{font-weight:600;color:var(--字);font-variant-numeric:tabular-nums}.摘要 .有{color:var(--主)}.摘要 .有 b{color:var(--主)}' +
-    '.摘要 .等待{color:var(--重启)}.摘要 .等待 b{color:var(--重启)}' +
+    '.摘要 .等待{color:var(--重启)}.摘要 .等待 b{color:var(--重启)}.摘要 .错,.摘要 .错 b{color:var(--错)}' +
     '.状态{min-height:1.5em;margin-bottom:8px;max-height:4.5em;overflow:auto;white-space:pre-wrap;font-size:12px;color:var(--弱)}' +
     '.操作{display:grid;grid-template-columns:auto 1fr auto auto;gap:8px}' +
     '@media (max-width:600px){.面板{top:auto;bottom:0;left:0;width:100%;height:84vh;height:84dvh;border-left:0;' +
@@ -184,6 +190,7 @@ export class ConfigDebugPanel {
     private directory: HTMLDivElement | null = null;
     private list: HTMLDivElement | null = null;
     private empty: HTMLDivElement | null = null;
+    private hint: HTMLDivElement | null = null;
     private exchange: HTMLDivElement | null = null;
     private exchangeButton: HTMLButtonElement | null = null;
     private text: HTMLTextAreaElement | null = null;
@@ -193,6 +200,11 @@ export class ConfigDebugPanel {
     private undoButton: HTMLButtonElement | null = null;
     private resetButton: HTMLButtonElement | null = null;
     private rows: FieldRow[] = [];
+    private rowIndex = new Map<string, FieldRow>();
+    /** 被显示条件引用的参数键；这些参数输入变化时重新筛选可见行。 */
+    private conditionKeys = new Set<string>();
+    /** 试算校验中未关联到具体参数的整体问题。 */
+    private generalProblems: string[] = [];
     private root: GroupNode = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
     private view: PanelView = { kind: 'node', node: this.root };
     private exchangeOpen = false;
@@ -247,6 +259,7 @@ export class ConfigDebugPanel {
         this.directory = this.element('div', '目录'); this.directory.setAttribute('aria-label', '参数分组'); panel.appendChild(this.directory);
         this.list = this.element('div', '列表'); panel.appendChild(this.list);
         this.empty = this.element('div', '空'); this.empty.hidden = true;
+        this.hint = this.element('div', '条件提示'); this.hint.hidden = true;
         this.exchange = this.buildExchange(); this.exchange.hidden = true; panel.appendChild(this.exchange);
 
         const footer = this.element('div', '底部'); panel.appendChild(footer);
@@ -297,9 +310,9 @@ export class ConfigDebugPanel {
         this.handlers.length = 0;
         this.host?.remove(); this.host = null; this.panel = null; this.entry = null; this.badge = null;
         this.backButton = null; this.crumbs = null; this.heading = null; this.searchBar = null; this.search = null; this.siblings = null;
-        this.directory = null; this.list = null; this.empty = null; this.exchange = null; this.exchangeButton = null; this.text = null;
+        this.directory = null; this.list = null; this.empty = null; this.hint = null; this.exchange = null; this.exchangeButton = null; this.text = null;
         this.summary = null; this.status = null; this.applyButton = null; this.undoButton = null; this.resetButton = null;
-        this.rows = [];
+        this.rows = []; this.rowIndex.clear(); this.conditionKeys.clear(); this.generalProblems = [];
         this.root = { key: '', name: '', title: '', description: undefined, parent: null, children: [], rows: [], all: [], section: null };
         this.view = { kind: 'node', node: this.root };
     }
@@ -331,25 +344,35 @@ export class ConfigDebugPanel {
             head.append(label, marks);
             const restore = this.button('↺', () => {}, '复原');
             restore.setAttribute('aria-label', '恢复默认：' + name); restore.title = '恢复声明默认值（需应用）';
-            const control = this.control(field, name); control.element.classList.add('控件'); control.element.appendChild(restore);
+            const control = this.control(field, name); control.element.classList.add('控件');
+            if (field.unit) { const unit = this.element('span', '单位'); unit.textContent = field.unit; control.element.appendChild(unit); }
+            control.element.appendChild(restore);
+            if (field.locked) {
+                element.classList.add('锁定');
+                control.element.querySelectorAll('input,select,textarea').forEach(input => { (input as HTMLInputElement).disabled = true; });
+                restore.disabled = true;
+            }
+            for (const condition of field.showWhen || []) this.conditionKeys.add(condition.key);
             const details = this.element('div', '详情'), note = this.element('div', '元');
+            const problem = document.createElement('p'); problem.className = '问题'; problem.hidden = true;
+            details.appendChild(problem);
             if (field.description) { const text = document.createElement('p'); text.className = '描述'; text.textContent = field.description; details.appendChild(text); }
             details.appendChild(note);
             element.append(head, control.element, details);
             node.section.lastElementChild!.appendChild(element);
             const row: FieldRow = { key, field, node, search: [key, field.label, node.title].join(' ').toLowerCase(),
-                element, control, marks, note, restore, dirty: false, invalid: false };
+                element, control, marks, note, restore, problem, problems: [], dirty: false, invalid: false };
             restore.addEventListener('click', () => { control.write(field.defaultValue); this.touch(row); });
             element.addEventListener('input', () => this.touch(row));
             element.addEventListener('change', () => this.touch(row));
             node.rows.push(row);
             for (let item: GroupNode | null = node; item; item = item.parent) item.all.push(row);
-            this.rows.push(row);
+            this.rows.push(row); this.rowIndex.set(key, row);
         }
         for (const node of this.walk(this.root)) {
             if (node.section) node.section.querySelector('h3 span')!.textContent = node.rows.length + ' 项';
         }
-        this.list!.appendChild(this.empty!);
+        this.list!.append(this.empty!, this.hint!);
     }
 
     /** 创建参数区块：标题可点击进入该分组（搜索与“已修改”视图中使用），参数放在白色卡片内。 */
@@ -497,10 +520,10 @@ export class ConfigDebugPanel {
         const text = this.element('span'), title = this.element('span', '条目名'), detail = this.element('span', '条目注');
         title.textContent = name; detail.textContent = note; text.append(title, detail);
         const counts = this.element('span', '计数');
-        const dirty = rows.filter(row => row.dirty).length;
+        const dirty = rows.filter(row => row.dirty).length, wrong = rows.filter(row => row.invalid || row.problems.length > 0).length;
         const overridden = rows.filter(row => { const source = snapshot.sources[row.key]; return source === '本地' || source === '会话'; }).length;
         const pending = rows.filter(row => snapshot.pendingRestart.indexOf(row.key) !== -1).length;
-        for (const [count, label, className] of [[dirty, '未应用', '未应用'], [overridden, '已覆盖', '覆盖'], [pending, '待重启', '待重启']] as [number, string, string][]) {
+        for (const [count, label, className] of [[wrong, '有误', '有误'], [dirty, '未应用', '未应用'], [overridden, '已覆盖', '覆盖'], [pending, '待重启', '待重启']] as [number, string, string][]) {
             if (!count) continue;
             const tag = this.element('span', className); tag.textContent = count + ' ' + label; counts.appendChild(tag);
         }
@@ -513,7 +536,7 @@ export class ConfigDebugPanel {
     private buildExchange(): HTMLDivElement {
         const page = this.element('div', '交换');
         const note = document.createElement('p');
-        note.textContent = '粘贴或选择配置 JSON 后导入到本次会话。导出、下载与复现链接会先应用未提交的改动；复现链接与保存到本机始终只含本次改动。';
+        note.textContent = '导出：选好范围后下载，或写入下方文本框再复制；导出前会先应用未提交的改动，复现链接始终只含本次改动。导入：把 JSON 粘贴到文本框后点“导入文本”，或直接从文件导入，参数进入本次会话。';
         page.appendChild(note);
         const scopes = document.createElement('fieldset'); scopes.className = '范围';
         const legend = document.createElement('legend'); legend.textContent = '导出范围'; scopes.appendChild(legend);
@@ -525,22 +548,27 @@ export class ConfigDebugPanel {
             text.append(title, detail); item.append(radio, text); scopes.appendChild(item);
         }
         page.appendChild(scopes);
-        this.text = document.createElement('textarea'); this.text.maxLength = CONFIG_TEXT_LIMIT;
-        this.text.placeholder = '在此粘贴配置 JSON；导出的 JSON 或复现链接也显示在此';
-        this.text.setAttribute('aria-label', '配置导入导出内容'); page.appendChild(this.text);
-        const group = this.element('div', '按钮组'); page.appendChild(group);
-        group.appendChild(this.button('导入 JSON', () => this.run(() => this.reportImport(this.session.store.importDocument(this.text!.value), 'JSON 已导入'))));
-        const file = document.createElement('label'); file.className = '文件'; file.textContent = '选择文件';
-        const upload = document.createElement('input'); upload.type = 'file'; upload.accept = '.json,application/json';
-        upload.setAttribute('aria-label', '选择配置 JSON 文件');
-        upload.addEventListener('change', () => this.readFile(upload));
-        file.appendChild(upload); group.appendChild(file);
-        group.appendChild(this.button('导出到文本框', () => this.run(() => this.exportText(this.exportScope))));
-        group.appendChild(this.button('下载 JSON', () => this.run(() => { this.apply(); this.download(); })));
-        group.appendChild(this.button('生成复现链接', () => this.run(() => {
+        // 导出操作紧跟导出范围：最常用的下载在首位；写入文本框与复现链接的结果出现在紧邻的文本框中。
+        const output = this.element('div', '按钮组'); page.appendChild(output);
+        output.appendChild(this.button('下载 JSON', () => this.run(() => { this.apply(); this.download(); }), '主'));
+        output.appendChild(this.button('导出到文本框', () => this.run(() => this.exportText(this.exportScope))));
+        const link = this.button('生成复现链接', () => this.run(() => {
             this.apply(); this.text!.value = this.session.shareURL(); this.report('链接已生成，只携带相对项目参数的改动；打开后按目标值启动');
-        })));
-        group.appendChild(this.button('复制文本', () => this.copy()));
+        }));
+        link.title = '始终只含本次改动，与所选导出范围无关'; output.appendChild(link);
+        const heading = document.createElement('h4'); heading.className = '小节'; heading.textContent = '文本内容'; page.appendChild(heading);
+        this.text = document.createElement('textarea'); this.text.maxLength = CONFIG_TEXT_LIMIT;
+        this.text.placeholder = '导出的 JSON 或复现链接显示在此；也可在此粘贴配置 JSON 后导入';
+        this.text.setAttribute('aria-label', '配置导入导出内容'); page.appendChild(this.text);
+        // 文本框操作紧贴文本框：复制导出结果、导入粘贴内容；从文件导入与之同属导入。
+        const input = this.element('div', '按钮组'); page.appendChild(input);
+        input.appendChild(this.button('复制文本', () => this.copy()));
+        input.appendChild(this.button('导入文本', () => this.run(() => this.reportImport(this.session.store.importDocument(this.text!.value), 'JSON 已导入'))));
+        const file = document.createElement('label'); file.className = '文件'; file.textContent = '从文件导入';
+        const upload = document.createElement('input'); upload.type = 'file'; upload.accept = '.json,application/json';
+        upload.setAttribute('aria-label', '从文件导入配置 JSON');
+        upload.addEventListener('change', () => this.readFile(upload));
+        file.appendChild(upload); input.appendChild(file);
         return page;
     }
 
@@ -660,7 +688,41 @@ export class ConfigDebugPanel {
     private touch(row: FieldRow): void {
         const snapshot = this.session.store.snapshot();
         this.check(row, snapshot);
-        this.refreshRow(row, snapshot); this.refreshCounts(snapshot);
+        const changed = this.refreshProblems(); changed.add(row);
+        changed.forEach(item => this.refreshRow(item, snapshot)); this.refreshCounts(snapshot);
+        if (this.conditionKeys.has(row.key)) this.filter();
+    }
+
+    /** 试算全部可读的未应用输入合并后的校验结果，把问题分配到涉及的参数；返回问题有变化的行。 */
+    private refreshProblems(): Set<FieldRow> {
+        const changes: Record<string, ConfigValue> = Object.create(null);
+        for (const row of this.rows) {
+            if (!row.dirty || row.invalid) continue;
+            try { changes[row.key] = row.control.read(); } catch { /* 读取失败已标为输入有误 */ }
+        }
+        const issues = Object.keys(changes).length ? this.session.store.check('会话', changes) : [];
+        const byKey = new Map<string, string[]>(), general: string[] = [];
+        for (const issue of issues) {
+            if (!issue.keys.length) general.push(issue.message);
+            for (const key of issue.keys) byKey.set(key, (byKey.get(key) || []).concat(issue.message));
+        }
+        const changed = new Set<FieldRow>();
+        for (const row of this.rows) {
+            const next = byKey.get(row.key) || [];
+            if (next.join('\n') !== row.problems.join('\n')) { row.problems = next; changed.add(row); }
+        }
+        this.generalProblems = general;
+        return changed;
+    }
+
+    /** 显示条件按当前输入判断：条件参数有可读的未应用输入时用输入值，否则用目标值。 */
+    private conditionMet(row: FieldRow, snapshot: ConfigSnapshot): boolean {
+        return (row.field.showWhen || []).every(condition => {
+            const source = this.rowIndex.get(condition.key);
+            let value: ConfigValue = snapshot.desired[condition.key];
+            if (source && source.dirty && !source.invalid) { try { value = source.control.read(); } catch { /* 保持目标值 */ } }
+            return condition.values.some(item => configEqual(item, value));
+        });
     }
 
     /** 比较控件与目标值，更新未应用和非法状态。 */
@@ -674,32 +736,40 @@ export class ConfigDebugPanel {
         for (const row of this.rows) {
             if (row.dirty) this.check(row, snapshot);
             if (!row.dirty) row.control.write(snapshot.desired[row.key]);
-            this.refreshRow(row, snapshot);
         }
+        this.refreshProblems();
+        for (const row of this.rows) this.refreshRow(row, snapshot);
         this.refreshCounts(snapshot);
-        if (this.view.kind === 'changed' || this.query()) this.filter();
+        if (this.view.kind === 'changed' || this.query() || this.conditionKeys.size) this.filter();
     }
 
     /** 刷新行标记与元信息：生效时机、非默认来源、未应用、待重启及范围。 */
     private refreshRow(row: FieldRow, snapshot: ConfigSnapshot): void {
         const { field, key } = row, source = snapshot.sources[key], pending = snapshot.pendingRestart.indexOf(key) !== -1;
-        row.element.classList.toggle('已改', row.dirty && !row.invalid);
-        row.element.classList.toggle('非法', row.invalid);
+        const wrong = row.invalid || row.problems.length > 0;
+        row.element.classList.toggle('已改', row.dirty && !wrong);
+        row.element.classList.toggle('非法', wrong);
+        row.problem.textContent = row.problems.join('\n'); row.problem.hidden = !row.problems.length;
         const marks: [string, string][] = [[field.timing || '重启', field.timing === '实时' ? '实时' : '重启']];
+        if (field.locked) marks.push(['锁定', '锁定']);
         if (source !== '默认') marks.push([source, '来源']);
         if (pending) marks.push(['待重启', '待重启']);
         if (row.dirty) marks.push(row.invalid ? ['输入有误', '输入有误'] : ['未应用', '未应用']);
+        if (!row.invalid && row.problems.length) marks.push(['有误', '有误']);
         row.marks.replaceChildren(...marks.map(([text, className]) => { const tag = this.element('span', className); tag.textContent = text; return tag; }));
-        row.restore.classList.toggle('隐藏', !row.dirty && configEqual(snapshot.desired[key], field.defaultValue));
+        row.restore.classList.toggle('隐藏', !!field.locked || (!row.dirty && configEqual(snapshot.desired[key], field.defaultValue)));
         const keyButton = this.button(key, () => this.copyKey(key), '键'); keyButton.title = '点击复制参数键';
         const items: HTMLElement[] = [keyButton];
         const limits = field.kind === '数值' || field.kind === '向量' ? field : null;
         if (limits && (limits.min !== undefined || limits.max !== undefined))
-            items.push(this.metaItem('范围', (limits.min ?? '−∞') + ' – ' + (limits.max ?? '∞')));
+            items.push(this.metaItem('范围', (limits.min ?? '−∞') + ' – ' + (limits.max ?? '∞') + (field.unit ? ' ' + field.unit : '')));
         if (limits?.step !== undefined) items.push(this.metaItem('步长', String(limits.step)));
         else if (limits?.integer) items.push(this.metaItem('取值', '整数'));
         if (field.kind === '文本' && field.maxLength !== undefined) items.push(this.metaItem('最长', field.maxLength + ' 字'));
-        if (field.kind !== '数据') items.push(this.metaItem('默认', formatValue(field.defaultValue)));
+        if (field.kind !== '数据') items.push(this.metaItem('默认', formatValue(field.defaultValue) + (field.unit ? ' ' + field.unit : '')));
+        if (field.showWhen) items.push(this.metaItem('显示条件', field.showWhen.map(condition =>
+            (this.rowIndex.get(condition.key)?.field.label || condition.key) + ' 为 ' + condition.values.map(formatValue).join(' / ')).join('，')));
+        if (field.locked) items.push(this.metaItem('锁定', '只能在项目配置中修改'));
         if (pending) items.push(this.metaItem('本局仍为', formatValue(snapshot.active[key]), '运行'));
         row.note.replaceChildren(...items);
     }
@@ -720,7 +790,7 @@ export class ConfigDebugPanel {
     /** 刷新底部摘要、应用按钮、入口徽标与目录计数；每次输入、应用、撤销或外部变化后调用。 */
     private refreshCounts(snapshot: ConfigSnapshot): void {
         const dirtyRows = this.rows.filter(row => row.dirty), dirty = dirtyRows.length;
-        const live = dirtyRows.filter(row => row.field.timing === '实时').length, invalid = dirtyRows.filter(row => row.invalid).length;
+        const live = dirtyRows.filter(row => row.field.timing === '实时').length, invalid = this.rows.filter(row => row.invalid || row.problems.length > 0).length;
         const pending = snapshot.pendingRestart.length;
         const overridden = this.rows.filter(row => { const source = snapshot.sources[row.key]; return source === '本地' || source === '会话'; }).length;
         const items: HTMLSpanElement[] = [];
@@ -733,6 +803,10 @@ export class ConfigDebugPanel {
         else item(['没有未应用的输入']);
         item(['待重启 ', pending, ' 项'], pending ? '等待' : '');
         item(['已覆盖 ', overridden, ' 项']);
+        if (this.generalProblems.length) {
+            item(['整体问题 ', this.generalProblems.length, ' 条'], '错');
+            items[items.length - 1].title = this.generalProblems.join('\n');
+        }
         this.summary!.replaceChildren(...items);
         this.summary!.title = pending ? '待重启参数在刷新页面或重新进入后生效；刷新前先保存到本机，或用复现链接打开' : '';
         this.applyButton!.textContent = dirty ? '应用 ' + dirty + ' 项改动' : '应用改动';
@@ -761,7 +835,14 @@ export class ConfigDebugPanel {
             if (!configEqual(value, desired[row.key])) changes[row.key] = value;
         }
         if (!Object.keys(changes).length) return { changed: false, deferred: false };
-        return this.session.store.patchLayer('会话', changes);
+        try { return this.session.store.patchLayer('会话', changes); }
+        catch (error) {
+            // 定位到第一个带参数键的问题所在行，问题文本已由输入时的试算显示在该行。
+            const key = error instanceof ConfigError ? error.details.map(item => item.keys[0]).filter(item => !!item)[0] : undefined;
+            const row = key ? this.rowIndex.get(key) : undefined;
+            if (row) this.reveal(row);
+            throw error;
+        }
     }
 
     /** 把全部未应用输入恢复为当前目标值。 */
@@ -773,8 +854,9 @@ export class ConfigDebugPanel {
             row.control.write(snapshot.desired[row.key]); row.dirty = false; row.invalid = false; count++;
             this.refreshRow(row, snapshot);
         }
+        this.refreshProblems().forEach(row => this.refreshRow(row, snapshot));
         this.refreshCounts(snapshot);
-        if (this.view.kind === 'changed') this.filter();
+        if (this.view.kind === 'changed' || this.conditionKeys.size) this.filter();
         this.report('已撤销 ' + count + ' 项未应用的输入');
     }
 
@@ -860,9 +942,13 @@ export class ConfigDebugPanel {
         if (!this.list) return;
         const query = this.query(), view = this.view, snapshot = this.session.store.snapshot(), visible = new Set<GroupNode>();
         const crossGroup = !!query || view.kind === 'changed';
+        let conditional = 0;
         for (const row of this.rows) {
-            const show = query ? row.search.indexOf(query) !== -1
+            const match = query ? row.search.indexOf(query) !== -1
                 : view.kind === 'changed' ? this.changed(row, snapshot) : row.node === view.node;
+            // “已修改”汇总始终列出改动，其余视图隐藏未满足显示条件的参数。
+            const show = match && (view.kind === 'changed' || this.conditionMet(row, snapshot));
+            if (match && !show) conditional++;
             row.element.hidden = !show;
             if (show) visible.add(row.node);
         }
@@ -873,6 +959,8 @@ export class ConfigDebugPanel {
         }
         this.empty!.hidden = visible.size > 0;
         this.empty!.textContent = query ? '没有匹配的参数' : view.kind === 'changed' ? '没有未应用的输入或覆盖' : '没有参数';
+        this.hint!.hidden = !conditional;
+        this.hint!.textContent = '另有 ' + conditional + ' 项参数在满足显示条件后出现';
     }
 
     /** 生成标准按钮，统一使用显式点击行为，不注册全局快捷键。 */

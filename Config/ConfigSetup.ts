@@ -1,6 +1,6 @@
 import type { ConfigDefinition, ConfigTree, ConfigTreeValues } from './ConfigDefinition';
 import { ConfigSnapshot, ConfigStore } from './ConfigStore';
-import { ConfigError, ConfigGroupInfo, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
+import { ConfigError, ConfigGroupInfo, ConfigIssueInput, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
 
 /** 容器读取接口，扩展只需按键读取生效值。 */
 export interface ConfigReader { get(key: string): ConfigValue }
@@ -29,8 +29,11 @@ export interface ConfigPlugin {
     dispose?(): void;
 }
 
-/** 跨字段校验：values 为定义的嵌套值，flat 含扩展字段在内的全部扁平值。 */
-export type ConfigValidator<T> = (values: ConfigTreeValues<T>, flat: ConfigRecord) => readonly string[];
+/**
+ * 跨字段校验：values 为定义的嵌套值，flat 含扩展字段在内的全部扁平值。返回文本或
+ * configIssue(说明, ...涉及的参数键)；带键的问题会在面板对应字段旁显示。
+ */
+export type ConfigValidator<T> = (values: ConfigTreeValues<T>, flat: ConfigRecord) => readonly ConfigIssueInput[];
 
 /** 启动完成后的配置运行实例，持有定义与容器；读取值通过 definition.values。 */
 export class ConfigRuntime<T extends ConfigTree> {
@@ -100,7 +103,7 @@ export class ConfigSetup<T extends ConfigTree> {
             validate: flat => {
                 if (!validators.length) return [];
                 const nested = definition.read(flat);
-                return validators.reduce<string[]>((issues, validator) => issues.concat(validator(nested, flat)), []);
+                return validators.reduce<ConfigIssueInput[]>((issues, validator) => issues.concat(validator(nested, flat)), []);
             } });
         const warnings: string[] = [];
         if (this.projectInput !== undefined) warnings.push(...store.importDocument(this.projectInput, '项目').map(text => '项目配置：' + text));

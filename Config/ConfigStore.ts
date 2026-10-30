@@ -1,4 +1,4 @@
-import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigGroupEntry, ConfigGroupInfo, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema, ConfigUpdateResult,
+import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigGroupEntry, ConfigGroupInfo, ConfigIssue, ConfigIssueInput, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema, ConfigUpdateResult,
     ConfigValue } from './ConfigTypes';
 
 const LAYERS: readonly ConfigLayer[] = ['项目', '本地', '会话'];
@@ -12,7 +12,7 @@ export interface ConfigStoreOptions {
     schema: ConfigSchema;
     /** 分组声明，按显示顺序；字段引用了未声明的分组时自动补一个以键为标题的分组。 */
     groups?: readonly ConfigGroupInfo[];
-    validate?: (values: ConfigRecord) => readonly string[];
+    validate?: (values: ConfigRecord) => readonly ConfigIssueInput[];
     /** 导入低于当前版本的文档时调用；未提供时按当前声明直接导入。 */
     migrate?: ConfigMigration;
     onListenerError?: (error: unknown) => void;
@@ -85,8 +85,15 @@ export function configEqual(a: unknown, b: unknown): boolean {
 
 /** 检查有限数值是否满足范围和整数约束。 */
 function numberAccepted(value: unknown, limits: { min?: number; max?: number; integer?: boolean }): boolean {
-    return typeof value === 'number' && Number.isFinite(value) && (limits.min === undefined || value >= limits.min) &&
-        (limits.max === undefined || value <= limits.max) && (!limits.integer || Number.isInteger(value));
+    return numberProblem(value, limits) === null;
+}
+
+/** 说明数值不满足约束的原因；合法时返回 null。 */
+function numberProblem(value: unknown, limits: { min?: number; max?: number; integer?: boolean }): string | null {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '必须是有限数值';
+    if ((limits.min !== undefined && value < limits.min) || (limits.max !== undefined && value > limits.max))
+        return '需在 ' + (limits.min ?? '−∞') + ' 至 ' + (limits.max ?? '∞') + ' 之间';
+    return limits.integer && !Number.isInteger(value) ? '必须是整数' : null;
 }
 
 /** 按字段类型分表校验取值；新增字段类型时在此表与面板控件表各加一项。 */
@@ -102,10 +109,17 @@ const KIND_CHECKS: { [K in ConfigField['kind']]: (field: Extract<ConfigField, { 
     向量: (field, value) => Array.isArray(value) && value.length === field.components.length && value.every(item => numberAccepted(item, field)),
 };
 
-/** 检查字段取值，返回中文问题；合法时返回空值。 */
+/** 检查字段取值，返回中文问题；合法时返回空值。数值与向量说明具体原因。 */
 function fieldIssue(key: string, field: ConfigField, value: ConfigValue): string | null {
     const check = KIND_CHECKS[field.kind] as (field: ConfigField, value: ConfigValue) => boolean;
-    return check(field, value) ? null : field.label + '（' + key + '）类型、范围或数据结构不合法';
+    if (check(field, value)) return null;
+    let reason = '类型、范围或数据结构不合法';
+    if (field.kind === '数值') reason = numberProblem(value, field) || reason;
+    else if (field.kind === '向量' && Array.isArray(value) && value.length === field.components.length) {
+        const index = value.findIndex(item => numberProblem(item, field) !== null);
+        if (index !== -1) reason = field.components[index] + ' ' + numberProblem(value[index], field);
+    }
+    return field.label + '（' + key + '）' + reason;
 }
 
 /** 检查声明本身的一致性，开发期错误在创建容器时直接报告。 */
@@ -114,6 +128,10 @@ function declarationIssue(key: string, field: ConfigField): string | null {
     if (!field.label || !field.label.trim() || (field.timing !== undefined && field.timing !== '实时' && field.timing !== '重启'))
         return '参数说明或生效时机无效：' + key;
     if (field.group !== undefined && (typeof field.group !== 'string' || !field.group)) return '参数分组必须为非空键路径：' + key;
+    if (field.unit !== undefined && (typeof field.unit !== 'string' || !field.unit.trim())) return '参数单位必须为非空文本：' + key;
+    if (field.showWhen !== undefined && (!Array.isArray(field.showWhen) ||
+        field.showWhen.some(condition => !condition || typeof condition.key !== 'string' || !Array.isArray(condition.values) || !condition.values.length)))
+        return '参数显示条件必须列出参数键与取值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') &&
         [field.min, field.max, field.step].some(value => value !== undefined && !Number.isFinite(value))) return '数值约束必须为有限数值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') && field.step !== undefined && field.step <= 0) return '面板步长必须大于零：' + key;
@@ -182,6 +200,14 @@ export class ConfigStore {
                 ...(field.kind === '向量' ? { components: [...field.components] } : {}) } as ConfigField);
         }
         this.schema = Object.freeze(schema);
+        for (const key of Object.keys(schema)) {
+            for (const condition of schema[key].showWhen || []) {
+                const target = schema[condition.key];
+                if (!target || condition.key === key) throw new ConfigError(['显示条件引用了未声明或自身的参数：' + key + ' → ' + condition.key]);
+                if (condition.values.some(value => fieldIssue(condition.key, target, value) !== null))
+                    throw new ConfigError(['显示条件的取值不符合参数声明：' + key + ' → ' + condition.key]);
+            }
+        }
         this.groupList = resolveGroups(options.groups || [], schema);
         const values = this.combine(this.layers);
         this.validateValues(values);
@@ -196,6 +222,22 @@ export class ConfigStore {
 
     /** 列出分组（按显示顺序，含父分组键），用于面板目录与文档工具；未分组的字段 group 为空。 */
     groups(): readonly ConfigGroupEntry[] { return this.groupList; }
+
+    /**
+     * 试算：假设把 values 合并进 layer 后的目标值，返回全部校验问题（不修改容器、不通知）。
+     * 面板据此在输入时把单字段与跨字段问题显示在相关字段旁；合法时返回空数组。
+     */
+    check(layer: ConfigLayer, values: unknown): readonly ConfigIssue[] {
+        try {
+            if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
+            const patch = this.readPatch(values, layer);
+            this.validateValues(this.combine({ ...this.layers, [layer]: { ...this.layers[layer], ...patch } }));
+            return [];
+        } catch (error) {
+            if (error instanceof ConfigError) return error.details;
+            throw error;
+        }
+    }
 
     /** 判断是否声明了指定键。 */
     hasField(key: string): boolean { return has(this.schema, key); }
@@ -223,7 +265,7 @@ export class ConfigStore {
     /** 合并某层的少量字段；删除覆盖请用完整替换，不用空值模拟删除。 */
     patchLayer(layer: ConfigLayer, values: unknown): ConfigUpdateResult {
         if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
-        const patch = this.readPatch(values);
+        const patch = this.readPatch(values, layer);
         return this.replaceLayer(layer, { ...this.layers[layer], ...patch });
     }
 
@@ -238,7 +280,7 @@ export class ConfigStore {
         const next = { ...this.layers };
         for (const key of Object.keys(updates)) {
             if (LAYERS.indexOf(key as ConfigLayer) === -1) throw new ConfigError(['未知配置层：' + key]);
-            next[key as ConfigLayer] = this.readPatch(updates[key as ConfigLayer]);
+            next[key as ConfigLayer] = this.readPatch(updates[key as ConfigLayer], key as ConfigLayer);
         }
         const desired = this.combine(next);
         this.validateValues(desired);
@@ -295,7 +337,8 @@ export class ConfigStore {
         }
         const accepted: Record<string, ConfigValue> = Object.create(null);
         for (const key of Object.keys(values)) {
-            const issue = has(this.schema, key) ? fieldIssue(key, this.schema[key], values[key]) : '未知配置键：' + key;
+            const issue = !has(this.schema, key) ? '未知配置键：' + key : layer !== '项目' && this.schema[key].locked
+                ? this.schema[key].label + '（' + key + '）已锁定，只能在项目配置中修改' : fieldIssue(key, this.schema[key], values[key]);
             if (issue) issues.push(issue + '，已跳过');
             else accepted[key] = values[key];
         }
@@ -341,15 +384,17 @@ export class ConfigStore {
         if (this.notifying) throw new ConfigError(['不能在配置通知中同步改写配置，请在业务下一次更新时提交']);
     }
 
-    /** 逐字段读取覆盖值，不接受拼写错误或隐式类型转换。 */
-    private readPatch(input: unknown): Record<string, ConfigValue> {
+    /** 逐字段读取覆盖值，不接受拼写错误、隐式类型转换或在本地与会话层覆盖锁定参数；一次列出全部单字段问题。 */
+    private readPatch(input: unknown, layer: ConfigLayer): Record<string, ConfigValue> {
         if (!isRecord(input)) throw new ConfigError(['配置值必须为普通对象']);
-        const copied = copyValue(input) as Record<string, ConfigValue>;
+        const copied = copyValue(input) as Record<string, ConfigValue>, issues: ConfigIssue[] = [];
         for (const key of Object.keys(copied)) {
             if (!has(this.schema, key)) throw new ConfigError(['未知配置键：' + key]);
-            const issue = fieldIssue(key, this.schema[key], copied[key]);
-            if (issue) throw new ConfigError([issue]);
+            const field = this.schema[key];
+            const issue = layer !== '项目' && field.locked ? field.label + '（' + key + '）已锁定，只能在项目配置中修改' : fieldIssue(key, field, copied[key]);
+            if (issue) issues.push({ message: issue, keys: [key] });
         }
+        if (issues.length) throw new ConfigError(issues);
         return freeze(copied);
     }
 
@@ -373,10 +418,10 @@ export class ConfigStore {
 
     /** 完整配置的跨字段约束也必须通过；例如最小速度不能超过最大速度。 */
     private validateValues(values: ConfigRecord): void {
-        const issues: string[] = [];
+        const issues: ConfigIssue[] = [];
         for (const key of Object.keys(this.schema)) {
             const issue = fieldIssue(key, this.schema[key], values[key]);
-            if (issue) issues.push(issue);
+            if (issue) issues.push({ message: issue, keys: [key] });
         }
         if (issues.length) throw new ConfigError(issues);
         const errors = this.options.validate ? this.options.validate(values) : [];
