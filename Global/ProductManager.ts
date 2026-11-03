@@ -1,5 +1,5 @@
 import { _decorator, CCInteger, Constructor, instantiate, Prefab } from 'cc';
-import { Queue } from '../DataStructure/Queue';
+import { RingDeque } from '../DataStructure/RingDeque';
 import { Product } from '../Product/Product';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
 const { ccclass, property } = _decorator;
@@ -14,12 +14,12 @@ export abstract class ProductManager<T extends Product> extends ComponentSinglet
     @property({ type: CCInteger, min: 0, tooltip: '缓存产品数量' })
     public cachedProductCount = 20;
 
-    protected _productQueue: Queue<T> = new Queue<T>();
+    protected _productQueue = new RingDeque<T>();
 
     protected abstract get productConstructor(): ProductConstructor<T>;
 
     public getProduct(): T {
-        if (this._productQueue.isEmpty) {
+        if (this._productQueue.size === 0) {
             const productNode = instantiate(this._productPrefab);
             productNode.setParent(this.node, true);
             const product: T = productNode.getComponent(this.productConstructor);
@@ -29,16 +29,16 @@ export abstract class ProductManager<T extends Product> extends ComponentSinglet
             }
             return product;
         }
-        const product = this._productQueue.dequeue();
+        const product = this._productQueue.popFront()!;
         product.node.active = true;
         return product;
     }
 
     public returnProduct(product: T): void {
-        if (this._productQueue.count < this.cachedProductCount) {
+        if (this._productQueue.size < this.cachedProductCount) {
             product.node.active = false;
             product.node.setParent(this.node, true);
-            this._productQueue.enqueue(product);
+            this._productQueue.pushBack(product);
         }
         else {
             product.node.destroy();

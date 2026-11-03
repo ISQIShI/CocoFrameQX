@@ -1,6 +1,4 @@
-import { _decorator, CCInteger, Component, director, Node, Pool, Tween, Vec3 } from 'cc';
-import { LinkedList } from '../DataStructure/LinkedList';
-import { Stack } from '../DataStructure/Stack';
+import { _decorator, CCInteger, Component, Node, Tween, Vec3 } from 'cc';
 const { ccclass, property } = _decorator;
 
 export type TransferProcess = Tween;
@@ -50,9 +48,9 @@ export class TransferItem {
 @ccclass('ProductContainer')
 export abstract class ProductContainer extends Component {
 
-    protected _comingItems: LinkedList<TransferItem> = new LinkedList<TransferItem>();
+    protected _comingItems = new Set<TransferItem>();
 
-    protected _items: Stack<Node> = new Stack<Node>();
+    protected _items: Node[] = [];
 
     protected _globalId: number = 0;
 
@@ -60,43 +58,43 @@ export abstract class ProductContainer extends Component {
 
     @property({ type: CCInteger })
     public get itemCount(): number {
-        return this._items.count;
+        return this._items.length;
     }
 
     @property({ type: CCInteger })
     public get comingItemCount(): number {
-        return this._comingItems.count;
+        return this._comingItems.size;
     }
 
     public get totalItemCount(): number {
-        return this._items.count + this._comingItems.count;
+        return this._items.length + this._comingItems.size;
     }
 
     public pushItem(item: Node): TransferItem {
         const id = ++this._globalId;
         const transferItem = new TransferItem(this, item, id);
         this.calculateWorldPos(transferItem);
-        this._comingItems.addLast(transferItem);
+        this._comingItems.add(transferItem);
         return transferItem;
     }
 
     public popItem(): Node {
-        if (this._items.isEmpty) {
+        if (this._items.length === 0) {
             return null;
         }
         return this._items.pop();
     }
 
     public peekItem(): Node {
-        if (this._items.isEmpty) {
+        if (this._items.length === 0) {
             return null;
         }
-        return this._items.peek();
+        return this._items[this._items.length - 1];
     }
 
     public itemArrive(transferItem: TransferItem): void {
         this._lastId = transferItem.itemId;
-        this._comingItems.remove(transferItem);
+        this._comingItems.delete(transferItem);
         this._items.push(transferItem.item);
 
         // 设置父节点
@@ -110,7 +108,7 @@ export abstract class ProductContainer extends Component {
     protected _tempVec3: Vec3 = new Vec3();
 
     protected idToIndex(id: number): number {
-        return this._items.count + (id - this._lastId - 1);
+        return this._items.length + (id - this._lastId - 1);
     }
 
     public abstract getItemParent(id: number): Node;

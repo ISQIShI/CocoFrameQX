@@ -56,15 +56,15 @@ export class Bag extends ProductContainer {
             const factor = 1.0 - Math.exp(-this.itemSpeed * dt);
 
             if (Vec3.equals(this.node.worldPosition, this._lastWorldPos)) {
-                for (let i = 0; i < this._items.count; i++) {
-                    const item = this._items.getElement(i);
+                for (let i = 0; i < this._items.length; i++) {
+                    const item = this._items[i];
                     const result = math.lerp(item.position.z, 0, factor);
                     item.setPosition(item.position.x, item.position.y, result);
                 }
             }
             else {
-                for (let i = 0; i < this._items.count; i++) {
-                    const item = this._items.getElement(i);
+                for (let i = 0; i < this._items.length; i++) {
+                    const item = this._items[i];
 
                     // 1. 直接取节点的高度 y（确保只与高度相关，且任何背包在同高度下值完全一致）
                     const y = Math.max(0, item.position.y);
@@ -83,16 +83,6 @@ export class Bag extends ProductContainer {
                 }
 
 
-                // const count = this._items.count;// this._items.count
-                // const space = this._items.count == 1 ? 0 : 1 / (count - 1);
-                // // const maxOffset = count * this.physicalOffset;
-                // for (let i = 0; i < this._items.count; i++) {
-                //     const item = this._items.getElement(i);
-                //     const t = i * space;
-                //     const maxOffset = (i + 1) * this.physicalOffset;
-                //     const result = math.lerp(item.position.z, -((t * t) * (maxOffset)), factor);
-                //     item.setPosition(item.position.x, item.position.y, result);
-                // }
             }
             this._lastWorldPos.set(this.node.worldPosition);
         }
