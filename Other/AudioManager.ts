@@ -3,6 +3,7 @@ export interface AudioVoiceBackend {
     play(): void;
     pause(): void;
     stop(): void;
+    /** 0..AUDIO_MAX_GAIN；超过 1 为在原音量上的增益，无法放大的后端按 1 播放。 */
     setVolume(volume: number): void;
     dispose(): void;
 }
@@ -21,11 +22,13 @@ export interface AudioPlayback {
     stop(): void;
     pause(): void;
     resume(): void;
+    /** 单次播放增益 0..AUDIO_MAX_GAIN；超过 1 在原音量基础上放大。 */
     setVolume(volume: number): void;
 }
 export interface AudioPlayOptions {
     bus?: string;
     loop?: boolean;
+    /** 单次播放增益，默认 1，限制到 0..AUDIO_MAX_GAIN；超过 1 在原音量基础上放大。 */
     volume?: number;
     priority?: number;
     /** 首次向后端提交播放前允许等待的秒数。0 只接受已缓存且当前可播放的资源；省略表示无限。 */
@@ -60,9 +63,11 @@ interface CacheEntry<C> {
     released: boolean;
 }
 interface Bus { volume: number; muted: boolean; maxVoices: number }
-function gain(value: number): number {
+/** 单次播放音量上限。主、平台、总线和作用域仍限制在 0..1，只有单次播放可以超过 1 作为增益。 */
+export const AUDIO_MAX_GAIN = 4;
+function gain(value: number, max = 1): number {
     if (!Number.isFinite(value)) throw new RangeError('音量必须是有限数值');
-    return Math.max(0, Math.min(1, value));
+    return Math.max(0, Math.min(max, value));
 }
 function limit(value: number): number {
     if (!Number.isInteger(value) || value < 1) throw new RangeError('并发上限必须是正整数');
@@ -148,7 +153,7 @@ export class AudioManager<C> {
             this.checkKey(key); this.bus(playback.bus);
             if (!Number.isFinite(playback.priority)) throw new RangeError('优先级必须是有限数值');
             if (options.maxDelay !== undefined && (!Number.isFinite(options.maxDelay) || options.maxDelay < 0)) throw new RangeError('等待期限必须为非负有限秒数');
-            playback.volume = gain(options.volume ?? 1);
+            playback.volume = gain(options.volume ?? 1, AUDIO_MAX_GAIN);
             playback.requestedAt = this.now();
             this.update();
             if (this.disposed || scope.isDisposed) { this.finish(playback, 'disposed'); return playback; }
@@ -336,6 +341,6 @@ class Playback<C> implements AudioPlayback {
     stop(): void { this.manager.finish(this, 'stopped'); }
     pause(): void { if (!this.done) { this.paused = true; this.manager.sync(this); } }
     resume(): void { if (!this.done) { this.paused = false; this.manager.sync(this); } }
-    setVolume(volume: number): void { if (!this.done) { this.volume = gain(volume); this.manager.sync(this); } }
+    setVolume(volume: number): void { if (!this.done) { this.volume = gain(volume, AUDIO_MAX_GAIN); this.manager.sync(this); } }
     complete(reason: AudioFinishReason): void { const resolve = this.resolveFinished; this.resolveFinished = undefined; resolve?.(reason); }
 }

@@ -1,6 +1,33 @@
 import { assetManager, AudioClip, AudioSource, Director, director, Game, game, Input, input, isValid, Node } from 'cc';
 import { AudioBackend, AudioManager, AudioManagerOptions, AudioVoiceBackend } from './AudioManager';
 
+/** AudioSource 在 player 安装并同步状态后发出的内部事件，此时排队的 play 已执行。 */
+const PLAYER_LOADED = 'audiosource-loaded';
+interface GainParam { value: number; cancelScheduledValues(time: number): unknown; setValueAtTime(value: number, time: number): unknown }
+interface GainLike { gain: GainParam; context?: { currentTime: number } }
+function isGain(value: unknown): value is GainLike {
+    const param = (value as { gain?: Partial<GainParam> } | null)?.gain;
+    return !!param && typeof param.setValueAtTime === 'function' && typeof param.cancelScheduledValues === 'function';
+}
+/**
+ * 引擎 AudioSource/AudioPlayer 都把音量限制在 0..1；WebAudio player 内部的 GainNode 没有上限。
+ * 私有字段在构建中会改名，只从受保护的 `_player` 起按形状向下查两层，找不到就返回 null。
+ */
+export function findAudioGain(source: AudioSource): GainLike | null {
+    let level: unknown[] = [(source as unknown as { _player?: unknown })._player];
+    for (let depth = 0; depth < 3; depth++) {
+        const next: unknown[] = [];
+        for (const value of level) {
+            if (!value || typeof value !== 'object') continue;
+            if (isGain(value)) return value;
+            if (depth < 2) for (const key of Object.keys(value)) next.push((value as Record<string, unknown>)[key]);
+        }
+        level = next;
+    }
+    return null;
+}
+let warnedNoGain = false;
+
 /** Cocos 的资源适配。key 是 resources 内的完整路径，不隐含 audio/ 前缀。 */
 export class CocosAudioBackend implements AudioBackend<AudioClip> {
     constructor(private readonly root: Node) {}
@@ -41,13 +68,33 @@ export class CocosAudioBackend implements AudioBackend<AudioClip> {
         const ended = (sender: AudioSource): void => {
             if (!disposed && sender === source) onEnded();
         };
+        // 超过 1 的部分写入 WebAudio 增益节点；引擎每次设置音量或安装 player 都会覆盖它，因此在这些时机之后重新写入。
+        const apply = (): void => {
+            const value = requested ? volume : 0;
+            source.volume = Math.min(1, value);
+            if (value <= 1) return;
+            const gainNode = findAudioGain(source);
+            if (!gainNode) {
+                if (!warnedNoGain && (source as unknown as { _player?: unknown })._player) {
+                    warnedNoGain = true;
+                    console.warn('[CocosAudioBackend] 当前音频后端不支持超过 1 的增益，按 1 播放');
+                }
+                return;
+            }
+            const time = gainNode.context?.currentTime ?? 0;
+            gainNode.gain.cancelScheduledValues(time);
+            gainNode.gain.setValueAtTime(value, time);
+        };
+        const refresh = (): void => { if (!disposed && requested && volume > 1) apply(); };
         node.on(AudioSource.EventType.ENDED, ended);
+        node.on(AudioSource.EventType.STARTED, refresh);
+        node.on(PLAYER_LOADED, refresh);
         return {
             play: () => {
                 if (disposed || requested) return;
                 if (!isValid(source, true)) throw new Error('Audio source has been destroyed');
                 requested = true;
-                source.volume = volume;
+                apply();
                 // Cocos 会将未就绪 player 的播放排队，不能依据 playing 每帧重试。
                 source.play();
             },
@@ -67,12 +114,14 @@ export class CocosAudioBackend implements AudioBackend<AudioClip> {
             },
             setVolume: value => {
                 volume = value;
-                if (!disposed) source.volume = requested ? volume : 0;
+                if (!disposed) apply();
             },
             dispose: () => {
                 if (disposed) return;
                 disposed = true;
                 node.off(AudioSource.EventType.ENDED, ended);
+                node.off(AudioSource.EventType.STARTED, refresh);
+                node.off(PLAYER_LOADED, refresh);
                 source.volume = 0;
                 source.stop();
                 source.clip = null;
