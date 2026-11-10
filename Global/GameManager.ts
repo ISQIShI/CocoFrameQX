@@ -1,9 +1,10 @@
 import { _decorator, AudioClip, Component, Input, input, ResolutionPolicy, screen, view } from 'cc';
 import { MulticastDelegate } from '../Delegate/MulticastDelegate';
-import { AudioManager } from '../Other/AudioManager';
-import { CocosAudioRuntime } from '../Other/CocosAudioRuntime';
+
 import { PlayableSDK } from '../SDK/PlayableSDK';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
+import { AudioManager } from '../Audio/AudioManager';
+import { CocosAudioRuntime } from '../Audio/CocosAudioRuntime';
 
 const { ccclass, disallowMultiple, property } = _decorator;
 
@@ -30,9 +31,6 @@ export class GameManager extends ComponentSingletonBase {
         return this._isPaused;
     }
 
-    /** 通用入口只装配音频，不再隐式播放名为 bgm 的资源。 */
-    @property({ tooltip: '可选背景音乐：resources 内完整路径；留空由玩法管理音乐' })
-    backgroundMusic = '';
     private audioRuntime: CocosAudioRuntime | null = null;
     private unbindPlatformAudio: (() => void) | null = null;
     /** 业务通过依赖注入共享此实例，各自创建作用域。 */
@@ -56,9 +54,6 @@ export class GameManager extends ComponentSingletonBase {
 
     protected start() {
         // 系统监听屏幕变化
-        if (this.backgroundMusic) this.audio?.createScope('game-manager-music')
-            .play(this.backgroundMusic, { bus: 'music', loop: true, priority: 100 });
-
         view.on("canvas-resize", this.resize, this);
         this.scheduleOnce(this.resize);
 
