@@ -11,7 +11,7 @@ CocoFrameQX 是供 Cocos Creator 游戏复用的 TypeScript 模块集合，包�
 | 第一次接入，决定如何创建和退出服务 | [接入流程](#4-接入流程) → [Service](Service/README.md) |
 | 集中声明玩法参数，支持测试调参 | [Config](Config/README.md)，调试面板按需使用 `Config/Tools` |
 | 模块间广播通知、管理监听生命周期 | [Event](Event/README.md) |
-| 音乐、音效、混音、暂停与播放所有权 | [AudioManager](Other/AudioManager.md) |
+| 音乐、音效、混音、暂停与播放所有权 | [通用音频](Audio/AudioCore.md) |
 | 帧队列、活动实体、优先任务、概率、位标记、邻域查询 | [DataStructure](DataStructure/README.md) |
 | 跟随 / 镜头运动、角色移动、物品堆叠、UI 引导 | [场景组件导航](#3-场景组件与配套模块) |
 | 试玩渠道适配、交互上报、下载或本地化 | [SDK 导航](#3-场景组件与配套模块)，先确认宿主平台提供的接口 |
@@ -26,7 +26,7 @@ CocoFrameQX 是供 Cocos Creator 游戏复用的 TypeScript 模块集合，包�
 | **Service** | `ServiceLocator` 管理显式工厂、类型化令牌、singleton / scoped / transient、父子作用域、异步就绪和释放所有权 | [README](Service/README.md)。核心从 `Service/index.ts` 导入；组件借用 / 创建从 `CocosServiceExtensions.ts` 导入 |
 | **Event** | `EventCenter` 同步分发类型化事件；订阅句柄及 `EventScope` 管理监听所有权 | [README](Event/README.md)。核心从 `Event/index.ts` 导入；组件生命周期连接单独导入 `CocosExtension.ts` |
 | **DataStructure** | RingDeque、DenseSet、StablePriorityQueue、WeightedTable、BitSet、SpatialHash2D | [README](DataStructure/README.md)。核心从 `DataStructure/index.ts` 导入；纯 TypeScript，选型、API 和边界逐个说明 |
-| **Other / Audio** | `AudioManager.ts` 管理音频加载、播放句柄、作用域、混音总线和预算；`CocosAudioRuntime.ts` 提供引擎后端 | [音频说明](Other/AudioManager.md)。核心不依赖 cc；音频运行时由宿主显式创建，SDK 桥接另行装配 |
+| **Audio** | `AudioCore.ts` 管理资源直入的播放句柄、作用域、总线和预算。Cocos 运行时和 Bundle 提供者分别负责驱动声部与动态获取资源 | [音频说明](Audio/AudioCore.md) |
 | **Delegate** | `MulticastDelegate` 将一组函数作为对象成员暴露，支持指定 target、增删与调用结果 | [源码](Delegate/MulticastDelegate.ts)。纯 TypeScript，适合局部回调；跨模块事件及订阅所有权优先看 Event |
 | **DirectorSystem** | `IClip` 定义进入 / 更新 / 退出，`ClipRunner` 顺序执行片段；`CustomClip` 提供回调片段，`MoveClip` 提供节点移动片段 | [目录](DirectorSystem/)、[ClipRunner](DirectorSystem/ClipRunner.ts)。runner / interface / CustomClip 不依赖 cc，MoveClip 依赖 cc；宿主每帧调用 update，不会自行启动 |
 | **Singleton** | `SingletonBase` 管理普通类实例；`ComponentSingletonBase` 管理组件实例、可选自动创建和常驻 | [目录](Singleton/)。普通类与组件生命周期不同；新增有场景作用域或可替换依赖的服务优先选择 Service |
@@ -113,7 +113,7 @@ void exampleLevel().catch(console.error);
 - **Config**：先声明参数，再通过 `definition.setup(...).start()` 启动；从 definition.values 读取。场景退出调用 runtime.dispose，测试工具按需用插件接入。
 - **Service**：明确值是借用还是接管，工厂显式声明 initialize / dispose。异步服务先 getAsync；退出必须观察 disposeAsync 的完成或失败，Cocos 不会等待异步 onDestroy。
 - **Event**：监听保留句柄或纳入 scope；组件适配器在 onEnable / onDisable / onDestroy 显式调用 enable / disable / dispose。emit 同步分发，不等待 async 回调。
-- **Audio**：在音频根节点创建 CocosAudioRuntime，业务各自创建作用域；宿主交互解锁、SDK 音量桥接和退出清理见音频文档。只用核心时自行提供后端、驱动 update 和释放。
+- **Audio**：在音频根节点创建 CocosAudioRuntime，从 `runtime.core` 创建作用域并传入已就绪的 Clip。宿主交互解锁、资源租约和退出清理见音频文档。
 - **DataStructure / DirectorSystem**：容器不更新游戏，ClipRunner 需宿主每帧传入 deltaTime；任务上限、暂停、空间索引更新及 Node 回收由业务负责。
 - **组件与池**：核对序列化引用及 onEnable / onDisable / onDestroy 链路；停止已有 Tween、归还临时对象和解绑监听的责任以具体组件为准。
 
@@ -142,4 +142,4 @@ node tools/coco-frame-qx/data-structure.test.cjs
 
 根据改动选择相关检查：纯逻辑检查类型和行为；组件检查依赖与序列化绑定；涉及音频输出、输入、物理、渲染和平台 SDK 时，在授权的真实运行环境验证。静态检查及引擎替身测试不等同于真实 Preview 或设备表现。
 
-主要阅读入口：[配置](Config/README.md) · [服务](Service/README.md) · [事件](Event/README.md) · [音频](Other/AudioManager.md) · [数据结构](DataStructure/README.md)。仓库许可证见 [LICENSE](LICENSE)。
+主要阅读入口：[配置](Config/README.md) · [服务](Service/README.md) · [事件](Event/README.md) · [音频](Audio/AudioCore.md) · [数据结构](DataStructure/README.md)。仓库许可证见 [LICENSE](LICENSE)。

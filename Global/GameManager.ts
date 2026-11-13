@@ -3,7 +3,7 @@ import { MulticastDelegate } from '../Delegate/MulticastDelegate';
 
 import { PlayableSDK } from '../SDK/PlayableSDK';
 import { ComponentSingletonBase } from '../Singleton/ComponentSingletonBase';
-import { AudioManager } from '../Audio/AudioManager';
+import type { AudioCore } from '../Audio/AudioCore';
 import { CocosAudioRuntime } from '../Audio/CocosAudioRuntime';
 
 const { ccclass, disallowMultiple, property } = _decorator;
@@ -34,8 +34,8 @@ export class GameManager extends ComponentSingletonBase {
     private audioRuntime: CocosAudioRuntime | null = null;
     private unbindPlatformAudio: (() => void) | null = null;
     /** 业务通过依赖注入共享此实例，各自创建作用域。 */
-    get audio(): AudioManager<AudioClip> | null {
-        return this.audioRuntime && !this.audioRuntime.isDisposed ? this.audioRuntime.manager : null;
+    get audio(): AudioCore<AudioClip> | null {
+        return this.audioRuntime && !this.audioRuntime.isDisposed ? this.audioRuntime.core : null;
     }
 
     protected onLoad(): void {
@@ -44,9 +44,9 @@ export class GameManager extends ComponentSingletonBase {
         this.audioRuntime = new CocosAudioRuntime(this.node, {
             onError: (error, context) => console.warn('[GameManager audio] ' + context, error),
         });
-        this.unbindPlatformAudio = PlayableSDK.bindAudio(this.audioRuntime.manager);
+        this.unbindPlatformAudio = PlayableSDK.bindAudio(this.audioRuntime.core);
         this.audioRuntime.addCleanup(this.unbindPlatformAudio);
-        this.audioRuntime.manager.setSuspended('game-manager:disabled', !this.enabledInHierarchy);
+        this.audioRuntime.core.setSuspended('game-manager:disabled', !this.enabledInHierarchy);
         input.on(Input.EventType.TOUCH_END, this.onInteracted, this);
         input.on(Input.EventType.MOUSE_UP, this.onInteracted, this);
         input.on(Input.EventType.KEY_UP, this.onInteracted, this);
