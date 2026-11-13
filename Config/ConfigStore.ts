@@ -1,5 +1,5 @@
-import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigGroupEntry, ConfigGroupInfo, ConfigIssue, ConfigIssueInput, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema, ConfigUpdateResult,
-    ConfigValue } from './ConfigTypes';
+import { ConfigDocument, ConfigError, ConfigExportScope, ConfigField, ConfigGroupEntry, ConfigGroupInfo, ConfigImportNote, ConfigIssue, ConfigIssueInput, ConfigLayer, ConfigMigration, ConfigRecord, ConfigSchema,
+    ConfigUpdateResult, ConfigValue, NumberLimits } from './ConfigTypes';
 
 const LAYERS: readonly ConfigLayer[] = ['项目', '本地', '会话'];
 /** 限制一次配置输入的字符数，避免误导入大型资源文件阻塞测试面板。 */
@@ -84,16 +84,30 @@ export function configEqual(a: unknown, b: unknown): boolean {
 }
 
 /** 检查有限数值是否满足范围和整数约束。 */
-function numberAccepted(value: unknown, limits: { min?: number; max?: number; integer?: boolean }): boolean {
+function numberAccepted(value: unknown, limits: NumberLimits): boolean {
     return numberProblem(value, limits) === null;
 }
 
-/** 说明数值不满足约束的原因；合法时返回 null。 */
-function numberProblem(value: unknown, limits: { min?: number; max?: number; integer?: boolean }): string | null {
+/** 说明数值不满足约束的原因；合法时返回 null。含开区间边界时用“大于 / 小于”表述。 */
+function numberProblem(value: unknown, limits: NumberLimits): string | null {
     if (typeof value !== 'number' || !Number.isFinite(value)) return '必须是有限数值';
-    if ((limits.min !== undefined && value < limits.min) || (limits.max !== undefined && value > limits.max))
-        return '需在 ' + (limits.min ?? '−∞') + ' 至 ' + (limits.max ?? '∞') + ' 之间';
+    const { min, max } = limits, low = limits.minExclusive === true, high = limits.maxExclusive === true;
+    if ((min !== undefined && (low ? value <= min : value < min)) || (max !== undefined && (high ? value >= max : value > max))) {
+        if (!low && !high) return '需在 ' + (min ?? '−∞') + ' 至 ' + (max ?? '∞') + ' 之间';
+        const parts: string[] = [];
+        if (min !== undefined) parts.push((low ? '大于 ' : '不小于 ') + min);
+        if (max !== undefined) parts.push((high ? '小于 ' : '不超过 ') + max);
+        return '需' + parts.join(' 且');
+    }
     return limits.integer && !Number.isInteger(value) ? '必须是整数' : null;
+}
+
+/** 提示文本中引用外部输入时的简短形式，避免超长或无法序列化的内容进入错误信息。 */
+function brief(value: unknown): string {
+    let text: string;
+    try { text = typeof value === 'string' ? value : JSON.stringify(value) ?? String(value); }
+    catch { text = String(value); }
+    return text.length > 40 ? text.slice(0, 39) + '…' : text;
 }
 
 /** 按字段类型分表校验取值；新增字段类型时在此表与面板控件表各加一项。 */
@@ -109,17 +123,29 @@ const KIND_CHECKS: { [K in ConfigField['kind']]: (field: Extract<ConfigField, { 
     向量: (field, value) => Array.isArray(value) && value.length === field.components.length && value.every(item => numberAccepted(item, field)),
 };
 
-/** 检查字段取值，返回中文问题；合法时返回空值。数值与向量说明具体原因。 */
+/**
+ * 检查字段取值，返回中文问题；合法时返回空值。数值与向量说明具体原因。
+ * 顺序：类型与范围 → 固定值 → 字段自定义校验；自定义校验抛出异常按不合法处理。
+ */
 function fieldIssue(key: string, field: ConfigField, value: ConfigValue): string | null {
-    const check = KIND_CHECKS[field.kind] as (field: ConfigField, value: ConfigValue) => boolean;
-    if (check(field, value)) return null;
-    let reason = '类型、范围或数据结构不合法';
-    if (field.kind === '数值') reason = numberProblem(value, field) || reason;
-    else if (field.kind === '向量' && Array.isArray(value) && value.length === field.components.length) {
-        const index = value.findIndex(item => numberProblem(item, field) !== null);
-        if (index !== -1) reason = field.components[index] + ' ' + numberProblem(value[index], field);
+    const check = KIND_CHECKS[field.kind] as (field: ConfigField, value: ConfigValue) => boolean, name = field.label + '（' + key + '）';
+    if (!check(field, value)) {
+        let reason = '类型、范围或数据结构不合法';
+        if (field.kind === '数值') reason = numberProblem(value, field) || reason;
+        else if (field.kind === '向量' && Array.isArray(value) && value.length === field.components.length) {
+            const index = value.findIndex(item => numberProblem(item, field) !== null);
+            if (index !== -1) reason = field.components[index] + ' ' + numberProblem(value[index], field);
+        }
+        return name + reason;
     }
-    return field.label + '（' + key + '）' + reason;
+    if (field.fixed && !configEqual(value, field.defaultValue)) return name + '固定为 ' + brief(field.defaultValue) + '，不可修改';
+    if (field.check) {
+        let problem: unknown;
+        try { problem = field.check(freeze(value)); }
+        catch { problem = '自定义校验执行出错'; }
+        if (problem) return name + String(problem);
+    }
+    return null;
 }
 
 /** 检查声明本身的一致性，开发期错误在创建容器时直接报告。 */
@@ -130,6 +156,8 @@ function declarationIssue(key: string, field: ConfigField): string | null {
     if (field.group !== undefined && (typeof field.group !== 'string' || !field.group)) return '参数分组必须为非空键路径：' + key;
     if (field.unit !== undefined && (typeof field.unit !== 'string' || !field.unit.trim())) return '参数单位必须为非空文本：' + key;
     if (field.showWhen !== undefined && typeof field.showWhen !== 'function') return '参数显示条件必须为函数：' + key;
+    if (field.check !== undefined && typeof field.check !== 'function') return '参数自定义校验必须为函数：' + key;
+    if (field.fixed !== undefined && typeof field.fixed !== 'boolean') return '参数固定标记必须为布尔值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') &&
         [field.min, field.max, field.step].some(value => value !== undefined && !Number.isFinite(value))) return '数值约束必须为有限数值：' + key;
     if ((field.kind === '数值' || field.kind === '向量') && field.step !== undefined && field.step <= 0) return '面板步长必须大于零：' + key;
@@ -176,7 +204,7 @@ export class ConfigStore {
     private readonly schema: ConfigSchema;
     private readonly groupList: readonly ConfigGroupEntry[];
     private readonly options: ConfigStoreOptions;
-    private layers: Record<ConfigLayer, Record<string, ConfigValue>> = { 项目: {}, 本地: {}, 会话: {} };
+    private layers: Record<ConfigLayer, Record<string, ConfigValue>> = { 项目: Object.freeze({}), 本地: Object.freeze({}), 会话: Object.freeze({}) };
     private state: ConfigSnapshot;
     private readonly listeners = new Set<(state: ConfigSnapshot) => void>();
     private notifying = false;
@@ -241,6 +269,15 @@ export class ConfigStore {
     /** 获取当前值、目标值、覆盖来源和待重启字段。 */
     snapshot(): ConfigSnapshot { return this.state; }
 
+    /**
+     * 读取某一层自身的覆盖值（只读，只含该层写入的键，不含继承）。
+     * 用于逐层显示一个参数的取值；撤销个别键的覆盖时，从返回值中去掉这些键后交给 replaceLayers。
+     */
+    layer(layer: ConfigLayer): ConfigRecord {
+        if (LAYERS.indexOf(layer) === -1) throw new ConfigError(['未知配置层：' + layer]);
+        return this.layers[layer];
+    }
+
     /** 在全部启动配置加载完后调用；此后重启字段只更新目标值，不改动运行中的实体。 */
     start(): void {
         this.assertWritable();
@@ -263,6 +300,7 @@ export class ConfigStore {
      * 原子替换多层，适用于同时清除本地与本次测试覆盖。
      * 目标值必须合法；启动后若“实时新值 + 本局重启旧值”的组合非法，本次改动整体推迟到重启，
      * 当前值保持不变并全部列入待重启，结果标记 deferred。
+     * 冲突若只来自较早被推迟的实时改动，则不连累本次提交：本次改动的实时字段照常生效，较早的继续等待重启。
      */
     replaceLayers(updates: Partial<Record<ConfigLayer, unknown>>): ConfigUpdateResult {
         this.assertWritable();
@@ -279,14 +317,19 @@ export class ConfigStore {
         let active = desired;
         let deferred = false;
         if (this.state.started) {
-            const mixed: Record<string, ConfigValue> = Object.create(null);
+            const previous = this.state.desired;
             // 只有明确声明实时的字段才在本局改变，其余参数等到新容器启动时生效。
-            for (const key of Object.keys(this.schema)) mixed[key] = this.schema[key].timing === '实时' ? desired[key] : current[key];
-            active = freeze(mixed);
-            try { this.validateValues(active); }
-            catch (error) {
-                if (!(error instanceof ConfigError)) throw error;
-                active = current; deferred = true;
+            const mix = (accept: (key: string) => boolean): ConfigRecord => {
+                const mixed: Record<string, ConfigValue> = Object.create(null);
+                for (const key of Object.keys(this.schema)) mixed[key] = this.schema[key].timing === '实时' && accept(key) ? desired[key] : current[key];
+                return freeze(mixed);
+            };
+            active = mix(() => true);
+            if (!this.accepts(active)) {
+                // 较早被推迟的实时改动仍与本局重启值冲突时，只让本次提交改动的实时字段生效，推迟状态不黏住无关改动。
+                const own = mix(key => !configEqual(desired[key], previous[key]));
+                if (!configEqual(own, active) && this.accepts(own)) active = own;
+                else { active = current; deferred = true; }
             }
         }
         this.layers = next;
@@ -303,32 +346,44 @@ export class ConfigStore {
      * 低版本文档先经 migrate 迁移；高于当前版本、项目不符、格式错误或跨字段规则失败时整份拒绝。
      */
     importDocument(input: unknown, layer: ConfigLayer = '会话'): readonly string[] {
+        return this.importNotes(input, layer).map(note => note.message);
+    }
+
+    /** 与 importDocument 相同，但每条跳过说明带上涉及的参数键，供调用方按键处理而不解析文案。 */
+    importNotes(input: unknown, layer: ConfigLayer = '会话'): readonly ConfigImportNote[] {
         let parsed: unknown = input;
         if (typeof input === 'string') {
             if (input.length > CONFIG_TEXT_LIMIT) throw new ConfigError(['配置文本超过 64K 字符限制']);
             try { parsed = JSON.parse(input); }
             catch { throw new ConfigError(['配置不是有效的 JSON 文本']); }
         }
-        if (!isRecord(parsed) || Object.keys(parsed).some(key => ['format', 'project', 'version', 'values'].indexOf(key) === -1) ||
-            parsed.format !== 1 || parsed.project !== this.project || typeof parsed.version !== 'number' ||
-            !Number.isInteger(parsed.version) || parsed.version < 1)
-            throw new ConfigError(['配置格式或项目标识不匹配，未导入']);
+        // 整份拒绝的原因逐一说明，便于区分文档写错、格式过新还是拿错了项目的文件。
+        if (!isRecord(parsed)) throw new ConfigError(['配置文档必须是 JSON 对象，未导入']);
+        const extra = Object.keys(parsed).filter(key => ['format', 'project', 'version', 'values'].indexOf(key) === -1);
+        if (extra.length) throw new ConfigError(['配置文档含不认识的顶层字段：' + extra.slice(0, 5).map(brief).join('、') + '，未导入']);
+        if (parsed.format !== 1)
+            throw new ConfigError([parsed.format === undefined ? '配置文档缺少 format 字段，未导入' : '配置文档格式为 ' + brief(parsed.format) + '，当前只支持 1，未导入']);
+        if (parsed.project !== this.project)
+            throw new ConfigError([parsed.project === undefined ? '配置文档缺少 project 字段，未导入'
+                : '配置文档属于项目 ' + brief(parsed.project) + '，当前项目为 ' + this.project + '，未导入']);
+        if (typeof parsed.version !== 'number' || !Number.isInteger(parsed.version) || parsed.version < 1)
+            throw new ConfigError(['配置文档的 version 必须为正整数，未导入']);
         const version = parsed.version;
         if (version > this.version) throw new ConfigError(['配置版本 ' + version + ' 高于当前版本 ' + this.version + '，未导入']);
         if (!isRecord(parsed.values)) throw new ConfigError(['配置值必须为普通对象']);
-        const issues: string[] = [];
+        const issues: ConfigImportNote[] = [];
         let values = copyValue(parsed.values) as Record<string, ConfigValue>;
         if (version < this.version) {
             if (this.options.migrate) {
                 try { values = copyValue(this.options.migrate(values, version)) as Record<string, ConfigValue>; }
                 catch (error) { throw new ConfigError(['配置从版本 ' + version + ' 迁移失败：' + (error instanceof Error ? error.message : String(error))]); }
                 if (!isRecord(values)) throw new ConfigError(['配置迁移结果必须为普通对象']);
-            } else issues.push('配置版本 ' + version + ' 早于当前版本 ' + this.version + '，已按当前声明导入');
+            } else issues.push({ message: '配置版本 ' + version + ' 早于当前版本 ' + this.version + '，已按当前声明导入' });
         }
         const accepted: Record<string, ConfigValue> = Object.create(null);
         for (const key of Object.keys(values)) {
             const issue = has(this.schema, key) ? fieldIssue(key, this.schema[key], values[key]) : '未知配置键：' + key;
-            if (issue) issues.push(issue + '，已跳过');
+            if (issue) issues.push({ message: issue + '，已跳过', key });
             else accepted[key] = values[key];
         }
         this.replaceLayer(layer, accepted);
@@ -414,6 +469,15 @@ export class ConfigStore {
         if (issues.length) throw new ConfigError(issues);
         const errors = this.options.validate ? this.options.validate(values) : [];
         if (errors.length) throw new ConfigError(errors);
+    }
+
+    /** 判断一组完整取值是否通过全部校验；只吞掉校验错误，其他异常照常抛出。 */
+    private accepts(values: ConfigRecord): boolean {
+        try { this.validateValues(values); return true; }
+        catch (error) {
+            if (!(error instanceof ConfigError)) throw error;
+            return false;
+        }
     }
 
     /** 对快照监听者逐个通知，保证解绑和异常不会破坏正在提交的事务。 */

@@ -33,7 +33,14 @@ export interface ConfigDescription {
      * 只影响面板，不影响取值、校验与导出；抛出异常时按显示处理。
      */
     showWhen?: ConfigCondition;
+    /** 固定值：任何层都只能取声明默认值，面板只读显示；用于需要公开但不允许调整的规则。 */
+    fixed?: boolean;
+    /** 单字段自定义校验：在类型与范围检查通过后执行，返回中文问题文本，合法时返回空值。 */
+    check?: ConfigFieldCheck;
 }
+
+/** 单字段自定义校验函数；参数为已通过类型与范围检查的只读取值，必须是纯检查。 */
+export type ConfigFieldCheck = (value: ConfigValue) => string | null | undefined;
 
 /** 分组声明：key 为分组在定义树中的键路径，作为稳定身份与层级依据；label 只用于显示。 */
 export interface ConfigGroupInfo {
@@ -47,10 +54,12 @@ export interface ConfigGroupEntry extends ConfigGroupInfo {
     readonly parent: string | null;
 }
 
-/** 数值约束，数值字段与向量字段的每个分量共用。 */
+/** 数值约束，数值字段与向量字段的每个分量共用；minExclusive / maxExclusive 为真时对应边界本身不可取。 */
 export interface NumberLimits {
     min?: number;
     max?: number;
+    minExclusive?: boolean;
+    maxExclusive?: boolean;
     integer?: boolean;
     step?: number;
 }
@@ -114,17 +123,36 @@ export interface ConfigDocument {
     values: Record<string, ConfigValue>;
 }
 
-/** 校验问题：message 为中文说明，keys 为涉及的参数键（可为空），面板据此把问题显示在对应字段旁。 */
-export interface ConfigIssue {
+/**
+ * 校验问题：message 为中文说明，keys 为涉及的参数键（可为空），面板据此把问题显示在对应字段旁。
+ * K 为允许的参数键类型；经配置定义的校验入口使用时收窄为定义中的键，拼错在编译期报错。
+ */
+export interface ConfigIssue<K extends string = string> {
     readonly message: string;
-    readonly keys: readonly string[];
+    readonly keys: readonly K[];
 }
 
 /** 校验函数的返回项：纯文本（不定位到字段）或带涉及参数键的问题。 */
-export type ConfigIssueInput = string | { readonly message: string; readonly keys?: readonly string[] };
+export type ConfigIssueInput<K extends string = string> = string | { readonly message: string; readonly keys?: readonly K[] };
 
 /** 声明涉及若干参数键的校验问题，例如 configIssue('最小值不能大于最大值', 'launch.min', 'launch.max')。 */
-export function configIssue(message: string, ...keys: string[]): ConfigIssue { return { message, keys }; }
+export function configIssue<K extends string = never>(message: string, ...keys: K[]): ConfigIssue<K> { return { message, keys }; }
+
+/** 启动提示的来源：项目文件、本地保存、复现链接、运行环境（存储或地址不可用），或其他插件。 */
+export type ConfigNoticeSource = '项目' | '本地' | '链接' | '环境' | '插件';
+
+/** 启动提示：message 为可直接展示的完整中文说明；source 标明来自哪份输入，key 为涉及的参数键（如被跳过的字段）。 */
+export interface ConfigNotice {
+    readonly source: ConfigNoticeSource;
+    readonly message: string;
+    readonly key?: string;
+}
+
+/** 宽松导入中被跳过或需要提示的一项；key 为涉及的参数键。 */
+export interface ConfigImportNote {
+    readonly message: string;
+    readonly key?: string;
+}
 
 /** 把校验返回项统一为带键列表的问题。 */
 export function toConfigIssue(input: ConfigIssueInput): ConfigIssue {

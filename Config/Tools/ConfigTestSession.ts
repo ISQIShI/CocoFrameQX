@@ -1,5 +1,5 @@
 import { CONFIG_TEXT_LIMIT, ConfigStore } from '../ConfigStore';
-import { ConfigError } from '../ConfigTypes';
+import { ConfigError, ConfigLayer, ConfigNotice } from '../ConfigTypes';
 
 /** 最小本地存储接口，可由浏览器存储、Cocos sys.localStorage 或测试替身实现。 */
 export interface ConfigStorage {
@@ -46,20 +46,25 @@ export class ConfigTestSession {
      * 在 store.start 和游戏创建之前恢复本地及链接配置；错误逐项返回，保留上一有效层。
      * 宽松导入跳过的未知键或非法字段同样作为提示返回，其余有效值照常应用。
      */
-    restore(): readonly string[] {
+    restore(): readonly string[] { return this.restoreNotices().map(notice => notice.message); }
+
+    /** 与 restore 相同，但每条提示带来源（环境、本地、链接）与涉及的参数键；插件据此交给启动流程。 */
+    restoreNotices(): readonly ConfigNotice[] {
         if (this.restored) return [];
         if (this.store.snapshot().started) throw new ConfigError(['请在游戏启动及配置 start 之前恢复测试参数']);
         this.restored = true;
-        const issues = [...this.startupIssues];
-        try {
-            const saved = this.storage?.getItem(this.storageKey);
-            if (saved !== null && saved !== undefined) issues.push(...this.store.importDocument(saved, '本地').map(text => '本地配置：' + text));
-        } catch (error) { issues.push('本地配置未应用：' + message(error)); }
-        try {
-            const text = this.url?.searchParams.get('qxValues');
-            if (text !== null && text !== undefined) issues.push(...this.store.importDocument(text, '会话').map(item => '链接配置：' + item));
-        } catch (error) { issues.push('链接配置未应用：' + message(error)); }
-        return issues;
+        const notices: ConfigNotice[] = this.startupIssues.map(text => ({ source: '环境' as const, message: text }));
+        const load = (source: '本地' | '链接', layer: ConfigLayer, read: () => string | null | undefined) => {
+            try {
+                const text = read();
+                if (text === null || text === undefined) return;
+                for (const note of this.store.importNotes(text, layer))
+                    notices.push({ source, message: source + '配置：' + note.message, ...(note.key !== undefined ? { key: note.key } : {}) });
+            } catch (error) { notices.push({ source, message: source + '配置未应用：' + message(error) }); }
+        };
+        load('本地', '本地', () => this.storage?.getItem(this.storageKey));
+        load('链接', '会话', () => this.url?.searchParams.get('qxValues'));
+        return notices;
     }
 
     /** 将相对项目基准的改动保存到本浏览器；失败时明确报错，不伪造保存成功。 */

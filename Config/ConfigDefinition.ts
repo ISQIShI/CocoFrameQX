@@ -24,6 +24,19 @@ export type ConfigTreeValues<T> = { readonly [K in keyof T]: ConfigNodeValue<T[K
 export type ConfigNodeValue<N> = N extends FieldBuilder<infer V> ? ConfigReadonly<V>
     : N extends ConfigGroup<infer C> ? ConfigTreeValues<C> : ConfigTreeValues<N>;
 
+/**
+ * 从定义树推导全部扁平配置键的联合类型，如 'launch.minSpeed' | 'debug.bounds'。
+ * 由程序生成、键名为任意字符串的层级退化为模板形式（如 `animals.${string}.radius`）或 string。
+ */
+export type ConfigTreeKeys<T> = string extends keyof T ? string : { [K in keyof T & string]: ConfigNodeKeys<K, T[K]> }[keyof T & string];
+
+/** 单个节点贡献的键：字段为自身键名，分组与普通对象为“键名.下级键”。 */
+type ConfigNodeKeys<K extends string, N> = N extends FieldBuilder<ConfigValue> ? K
+    : N extends ConfigGroup<infer C> ? `${K}.${ConfigTreeKeys<C>}` : `${K}.${ConfigTreeKeys<N>}`;
+
+/** 取某个配置定义的扁平键类型：ConfigKeyOf<typeof GAME>。 */
+export type ConfigKeyOf<D> = D extends ConfigDefinition<infer T> ? ConfigTreeKeys<T> : never;
+
 /** 定义接入容器所需的最小能力，避免依赖容器的泛型参数。 */
 export interface ConfigSource {
     snapshot(): { readonly active: unknown };
@@ -81,6 +94,15 @@ export class ConfigDefinition<T extends ConfigTree> {
 
     /** 判断是否已有容器接入。 */
     get attached(): boolean { return this.source !== null; }
+
+    /** 定义中全部扁平键，按声明顺序。 */
+    get keys(): readonly ConfigTreeKeys<T>[] { return this.leaves.map(leaf => leaf.key as ConfigTreeKeys<T>); }
+
+    /**
+     * 原样返回一个扁平键，仅用于让编译器核对它确实存在于定义中，
+     * 例如 snapshot.changed.indexOf(GAME.key('debug.bounds')) !== -1；拼错在编译期报错。
+     */
+    key<K extends ConfigTreeKeys<T>>(key: K): K { return key; }
 
     /** 接入容器，返回只释放本次接入的函数；容器必须包含定义中的全部键。 */
     attach(source: ConfigSource): () => void {

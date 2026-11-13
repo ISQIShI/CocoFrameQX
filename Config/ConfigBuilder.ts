@@ -1,4 +1,4 @@
-import { ConfigCondition, ConfigDescription, ConfigField, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
+import { ConfigCondition, ConfigDescription, ConfigField, ConfigFieldCheck, ConfigReadonly, ConfigTiming, ConfigValue, NumberLimits } from './ConfigTypes';
 
 /** 合并两个显示条件，须同时满足；任一为空时取另一个。 */
 function bothConditions(a: ConfigCondition | undefined, b: ConfigCondition | undefined): ConfigCondition | undefined {
@@ -58,9 +58,20 @@ export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuil
     /** 仅供类型推导的取值类型标记，运行时不存在。 */
     declare readonly valueType: V;
     private unitText: string | undefined;
+    private fixedValue = false;
+    private checks: ConfigFieldCheck[] = [];
 
     /** 设置显示单位，如 'm/s'、'秒'；只用于面板显示，不做换算。 */
     unit(text: string): this { this.unitText = text; return this; }
+    /** 固定为声明默认值：任何层写入其他值都校验失败，面板只读显示；用于公开但不允许调整的规则。 */
+    fixed(): this { this.fixedValue = true; return this; }
+    /**
+     * 追加本字段的自定义校验：参数为已通过类型与范围检查的只读取值，返回中文问题或空值；
+     * 多次调用按顺序检查并报告第一个问题。问题自动定位到本字段，跨字段规则仍写在 validate 中。
+     */
+    check(test: (value: ConfigReadonly<V>) => string | null | undefined): this {
+        this.checks.push(test as unknown as ConfigFieldCheck); return this;
+    }
 
     /** 生成字段声明；group 为所在分组的键路径，parent 为上级分组继承的属性，省略标题时使用键名。 */
     build(key: string, group?: string, parent?: ConfigInherited): ConfigField {
@@ -70,6 +81,14 @@ export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuil
         if (resolved.timing !== undefined) info.timing = resolved.timing;
         if (this.unitText !== undefined) info.unit = this.unitText;
         if (resolved.showWhen) info.showWhen = resolved.showWhen;
+        if (this.fixedValue) info.fixed = true;
+        if (this.checks.length) {
+            const checks = this.checks.slice();
+            info.check = value => {
+                for (const check of checks) { const problem = check(value); if (problem) return problem; }
+                return null;
+            };
+        }
         return this.create(info);
     }
     /** 由具体类型生成字段。 */
@@ -79,12 +98,16 @@ export abstract class FieldBuilder<V extends ConfigValue> extends ConfigNodeBuil
 /** 带数值约束的构建器，数值与向量字段共用。 */
 abstract class LimitedBuilder<V extends ConfigValue> extends FieldBuilder<V> {
     protected limits: NumberLimits = {};
-    /** 同时设置上下限。 */
-    range(min: number, max: number): this { this.limits.min = min; this.limits.max = max; return this; }
-    /** 设置下限。 */
-    min(value: number): this { this.limits.min = value; return this; }
-    /** 设置上限。 */
-    max(value: number): this { this.limits.max = value; return this; }
+    /** 同时设置上下限（含边界）。 */
+    range(min: number, max: number): this { return this.min(min).max(max); }
+    /** 设置下限（含边界）。 */
+    min(value: number): this { this.limits.min = value; delete this.limits.minExclusive; return this; }
+    /** 设置上限（含边界）。 */
+    max(value: number): this { this.limits.max = value; delete this.limits.maxExclusive; return this; }
+    /** 必须大于 value（不含边界），如 above(0) 表示正数。 */
+    above(value: number): this { this.limits.min = value; this.limits.minExclusive = true; return this; }
+    /** 必须小于 value（不含边界）。 */
+    below(value: number): this { this.limits.max = value; this.limits.maxExclusive = true; return this; }
     /** 只接受整数。 */
     int(): this { this.limits.integer = true; return this; }
     /** 设置面板步长。 */

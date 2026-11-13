@@ -1,6 +1,6 @@
-import type { ConfigDefinition, ConfigTree, ConfigTreeValues } from './ConfigDefinition';
+import type { ConfigDefinition, ConfigTree, ConfigTreeKeys, ConfigTreeValues } from './ConfigDefinition';
 import { ConfigSnapshot, ConfigStore } from './ConfigStore';
-import { ConfigError, ConfigGroupInfo, ConfigIssueInput, ConfigMigration, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
+import { ConfigError, ConfigGroupInfo, ConfigIssueInput, ConfigMigration, ConfigNotice, ConfigRecord, ConfigSchema, ConfigValue } from './ConfigTypes';
 
 /** 容器读取接口，扩展只需按键读取生效值。 */
 export interface ConfigReader { get(key: string): ConfigValue }
@@ -21,8 +21,11 @@ export interface ConfigExtension {
  * 核心只调用此接口，不依赖任何插件实现；不需要的功能不注册即可。
  */
 export interface ConfigPlugin {
-    /** 项目层已导入、重启参数锁定前调用，可写入本地或会话层；返回的提示并入运行实例的 warnings。 */
-    beforeStart?(store: ConfigStore): readonly string[] | void;
+    /**
+     * 项目层已导入、重启参数锁定前调用，可写入本地或会话层；返回的提示并入运行实例的 notices 与 warnings。
+     * 纯文本提示的来源记为“插件”，需要区分来源或带参数键时返回 ConfigNotice。
+     */
+    beforeStart?(store: ConfigStore): readonly (string | ConfigNotice)[] | void;
     /** 定义已接入、扩展已应用、订阅已建立后调用。 */
     afterStart?(store: ConfigStore): void;
     /** 运行实例释放或启动失败时按注册逆序调用。 */
@@ -32,15 +35,24 @@ export interface ConfigPlugin {
 /**
  * 跨字段校验：values 为定义的嵌套值，flat 含扩展字段在内的全部扁平值。返回文本或
  * configIssue(说明, ...涉及的参数键)；带键的问题会在面板对应字段旁显示。
+ * 问题的键必须是定义中的键，拼错在编译期报错；引用扩展字段（如绑定器登记的键）时用 Extra 列出这些键。
  */
-export type ConfigValidator<T> = (values: ConfigTreeValues<T>, flat: ConfigRecord) => readonly ConfigIssueInput[];
+export type ConfigValidator<T, Extra extends string = never> =
+    (values: ConfigTreeValues<T>, flat: ConfigRecord) => readonly ConfigIssueInput<ConfigTreeKeys<T> | Extra>[];
+
+/** 阻止编译器从实参反推类型参数：额外允许的键必须显式写出，否则拼错的键会被推断为“额外键”而通过。 */
+type Exact<T> = [T][T extends unknown ? 0 : never];
 
 /** 启动完成后的配置运行实例，持有定义与容器；读取值通过 definition.values。 */
 export class ConfigRuntime<T extends ConfigTree> {
+    /** 启动提示的文本形式，与 notices 一一对应；需要按来源或参数键处理时用 notices。 */
+    readonly warnings: readonly string[];
     private disposed = false;
-    /** 由 ConfigSetup.start 创建。 */
-    constructor(readonly definition: ConfigDefinition<T>, readonly store: ConfigStore, readonly warnings: readonly string[],
-        private readonly cleanup: () => void) {}
+    /** 由 ConfigSetup.start 创建；notices 为启动过程中各输入的提示，带来源与涉及的参数键。 */
+    constructor(readonly definition: ConfigDefinition<T>, readonly store: ConfigStore, readonly notices: readonly ConfigNotice[],
+        private readonly cleanup: () => void) {
+        this.warnings = Object.freeze(notices.map(notice => notice.message));
+    }
     /** 幂等释放：解除订阅、释放插件、恢复扩展写入的原值并释放定义接入；不清除用户保存的测试数据。 */
     dispose(): void {
         if (this.disposed) return;
@@ -56,7 +68,7 @@ export class ConfigRuntime<T extends ConfigTree> {
 export class ConfigSetup<T extends ConfigTree> {
     private readonly extensions: ConfigExtension[] = [];
     private readonly plugins: ConfigPlugin[] = [];
-    private readonly validators: ConfigValidator<T>[] = [];
+    private readonly validators: ConfigValidator<T, string>[] = [];
     private readonly listeners: ((snapshot: ConfigSnapshot) => void)[] = [];
     private migration: ConfigMigration | undefined;
     private projectInput: unknown = undefined;
@@ -69,8 +81,11 @@ export class ConfigSetup<T extends ConfigTree> {
     extend(extension: ConfigExtension | null | undefined): this { if (extension) this.extensions.push(extension); return this; }
     /** 注册启动插件，按注册顺序执行；空值忽略，便于按开关传入。 */
     use(plugin: ConfigPlugin | null | undefined): this { if (plugin) this.plugins.push(plugin); return this; }
-    /** 追加跨字段校验，可多次调用。 */
-    validate(validator: ConfigValidator<T>): this { this.validators.push(validator); return this; }
+    /**
+     * 追加跨字段校验，可多次调用。问题的键默认只能是定义中的键；引用扩展字段的键时写作
+     * validate<'扩展键' | …>(…)，键在运行期才确定时写作 validate<string>(…)。
+     */
+    validate<Extra extends string = never>(validator: ConfigValidator<T, Exact<Extra>>): this { this.validators.push(validator); return this; }
     /** 设置旧版本文档迁移函数。 */
     migrate(migration: ConfigMigration): this { this.migration = migration; return this; }
     /** 设置项目层文档（如 JsonAsset.json）；空值表示没有项目文件。 */
@@ -105,8 +120,11 @@ export class ConfigSetup<T extends ConfigTree> {
                 const nested = definition.read(flat);
                 return validators.reduce<ConfigIssueInput[]>((issues, validator) => issues.concat(validator(nested, flat)), []);
             } });
-        const warnings: string[] = [];
-        if (this.projectInput !== undefined) warnings.push(...store.importDocument(this.projectInput, '项目').map(text => '项目配置：' + text));
+        const notices: ConfigNotice[] = [];
+        if (this.projectInput !== undefined) {
+            for (const note of store.importNotes(this.projectInput, '项目'))
+                notices.push(Object.freeze({ source: '项目' as const, message: '项目配置：' + note.message, ...(note.key !== undefined ? { key: note.key } : {}) }));
+        }
         const started: ConfigPlugin[] = [], applied: ConfigExtension[] = [], unsubscribers: (() => void)[] = [];
         let release: (() => void) | null = null;
         // 逆序撤销已完成的步骤；启动失败与正常释放共用。
@@ -120,7 +138,7 @@ export class ConfigSetup<T extends ConfigTree> {
             for (const plugin of this.plugins) {
                 started.push(plugin);
                 const issues = plugin.beforeStart?.(store);
-                if (issues) warnings.push(...issues);
+                if (issues) for (const issue of issues) notices.push(typeof issue === 'string' ? { source: '插件', message: issue } : issue);
             }
             store.start();
             release = definition.attach(store);
@@ -131,6 +149,6 @@ export class ConfigSetup<T extends ConfigTree> {
             for (const listener of this.listeners) unsubscribers.push(store.subscribe(listener));
             for (const plugin of started) plugin.afterStart?.(store);
         } catch (error) { cleanup(); throw error; }
-        return new ConfigRuntime(definition, store, Object.freeze(warnings), cleanup);
+        return new ConfigRuntime(definition, store, Object.freeze(notices), cleanup);
     }
 }

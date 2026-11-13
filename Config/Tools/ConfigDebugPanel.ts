@@ -1,4 +1,4 @@
-import { ConfigError, ConfigExportScope, ConfigField, ConfigRecord, ConfigUpdateResult, ConfigValue } from '../ConfigTypes';
+import { ConfigError, ConfigExportScope, ConfigField, ConfigLayer, ConfigRecord, ConfigUpdateResult, ConfigValue, NumberLimits } from '../ConfigTypes';
 import { ConfigTestSession, message } from './ConfigTestSession';
 import { CONFIG_TEXT_LIMIT, ConfigSnapshot, configEqual } from '../ConfigStore';
 
@@ -21,7 +21,25 @@ interface FieldRow {
     /** 问题文本区；problems 为试算校验中涉及本字段的问题（单字段或跨字段）。 */
     problem: HTMLParagraphElement; problems: string[];
     dirty: boolean; invalid: boolean;
+    /** 逐层恢复列表及其展开状态；target 为已选择但尚未应用的恢复目标层，手动改值后失效。 */
+    ladder: HTMLDivElement; ladderOpen: boolean; target: ConfigLevel | null;
+    /** “本局仍为”元信息项，只在待重启时显示。 */
+    running: HTMLSpanElement;
+    /** 上次渲染的状态摘要；未变化时跳过整行的标记与列表重建。 */
+    signature: string;
 }
+
+/** 参数取值的层级：三层覆盖与兜底的声明默认值。 */
+type ConfigLevel = ConfigLayer | '默认';
+
+/** 一项未应用改动提交后的去向：写入会话层，或清除 clear 各层的覆盖后跟随 follow 层。 */
+interface CommitPlan { write: boolean; clear: ConfigLayer[]; follow: ConfigLevel }
+
+/** 逐层恢复列表的一行：top 为当前目标值的来源层；state 为状态文字，action 为可执行的操作名，二者至多一个非空。 */
+interface LevelEntry { level: ConfigLevel; value: ConfigValue; top: boolean; state: string; action: string }
+
+/** 各层在面板中的名称。 */
+const LEVEL_NAMES: Record<ConfigLevel, string> = { 会话: '本次会话', 本地: '本机保存', 项目: '项目配置', 默认: '声明默认' };
 
 /** 当前页面：分组目录或末级参数页（node）、混合分组的本级参数（own）、全部改动（changed）。 */
 type PanelView = GroupPage | { kind: 'changed' };
@@ -62,7 +80,9 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.入口{position:fixed;top:calc(10px + env(safe-area-inset-top,0px));right:calc(10px + env(safe-area-inset-right,0px));display:flex;align-items:center;gap:7px;' +
     'padding:7px 14px 7px 11px;border-radius:999px;border-color:var(--线);font-weight:600;box-shadow:0 4px 16px rgba(23,32,43,.16)}' +
     '.入口 svg{width:16px;height:16px;flex:none;color:var(--主)}' +
-    '.徽标{min-width:18px;padding:0 5px;border-radius:999px;background:var(--重启实);color:#3d2600;font-size:11px;line-height:18px;text-align:center;font-weight:700}' +
+    '.徽标{min-width:18px;padding:0 7px;border-radius:999px;background:var(--重启实);color:#3d2600;font-size:11px;line-height:18px;text-align:center;font-weight:700}' +
+    '.徽标.覆{background:var(--主底);color:var(--主)}' +
+    'input:disabled,select:disabled,textarea:disabled{background:var(--浮);color:var(--次);cursor:default;opacity:1}' +
     '.面板{position:fixed;top:0;right:0;width:min(480px,100vw);height:100vh;height:100dvh;display:flex;flex-direction:column;' +
     'background:var(--底);border-left:1px solid var(--线);box-shadow:-12px 0 36px rgba(23,32,43,.14);outline:none;' +
     'visibility:hidden;transform:translateX(100%);transition:transform .18s ease,visibility 0s linear .18s}' +
@@ -117,7 +137,16 @@ const STYLE = ':host{all:initial}*{box-sizing:border-box}[hidden]{display:none!i
     '.控件 input[type=range]{flex:1 1 auto;min-width:56px;height:18px;padding:0;margin:0;border:none;background:none;box-shadow:none;accent-color:var(--主)}' +
     '.控件 input[type=range]+input{flex:0 0 78px}.控件 select,.控件 input[type=text],.控件 textarea{width:100%}' +
     'textarea{min-height:84px;resize:vertical;font-family:var(--等宽);font-size:12px}' +
-    '.分量项{flex:1 1 0;display:flex;align-items:center;gap:4px;min-width:0}.分量项 span{font:11px var(--等宽);color:var(--弱);text-transform:uppercase}' +
+    // 分量按可用宽度自动换行，每个输入框至少留出四位数字的宽度，窄面板里多分量向量不再被挤成无法辨认。
+    '.分量组{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px 8px}' +
+    '.分量项{display:flex;align-items:center;gap:4px;min-width:0}.分量项 span{font:11px var(--等宽);color:var(--弱);text-transform:uppercase;white-space:nowrap}' +
+    '.层级{grid-column:1/-1;display:flex;flex-direction:column;border:1px solid var(--线);border-radius:8px;background:var(--底);overflow:hidden}' +
+    '.层{display:grid;grid-template-columns:5em minmax(0,1fr) auto;align-items:center;gap:8px;min-height:30px;padding:4px 8px 4px 10px;border-bottom:1px solid var(--线);font-size:12px}' +
+    '.层:last-child{border-bottom:none}.层 .层名{color:var(--次)}' +
+    '.层 .层值{font-family:var(--等宽);font-variant-numeric:tabular-nums;overflow-wrap:anywhere}' +
+    '.层 button{padding:4px 10px;font-size:12px}.层 .态{padding:0 7px;font-size:11px;color:var(--弱)}' +
+    '.层.当前 .层值{font-weight:600}.层.已选,.层.草稿{background:var(--主底)}.层.已选 .态,.层.草稿 .态{color:var(--主)}' +
+    '.去向{padding:6px 10px;font-size:11.5px;line-height:1.5;color:var(--次)}' +
     '.色块{flex:none;width:26px;height:26px;border-radius:6px;border:1px solid var(--线强);background-image:linear-gradient(45deg,#d9dee5 25%,transparent 25%,transparent 75%,#d9dee5 75%),' +
     'linear-gradient(45deg,#d9dee5 25%,transparent 25%,transparent 75%,#d9dee5 75%);background-size:8px 8px;background-position:0 0,4px 4px}.色块 i{display:block;width:100%;height:100%;border-radius:5px}' +
     'input[type=checkbox].开关{appearance:none;-webkit-appearance:none;position:relative;flex:none;width:36px;height:20px;margin:0;padding:0;' +
@@ -156,6 +185,20 @@ function formatValue(value: ConfigValue): string {
     return text.length > 60 ? text.slice(0, 59) + '…' : text;
 }
 
+/** 判断对象自身是否含有键，不读取原型链。 */
+function own(record: object, key: string): boolean { return Object.prototype.hasOwnProperty.call(record, key); }
+
+/** 元信息中的范围文字：闭区间写作“小 – 大”，含开区间边界时写作“> 0 且 ≤ 1”；没有范围时为空。 */
+function rangeText(limits: NumberLimits): string | null {
+    const { min, max } = limits;
+    if (min === undefined && max === undefined) return null;
+    if (!limits.minExclusive && !limits.maxExclusive) return (min ?? '−∞') + ' – ' + (max ?? '∞');
+    const parts: string[] = [];
+    if (min !== undefined) parts.push((limits.minExclusive ? '> ' : '≥ ') + min);
+    if (max !== undefined) parts.push((limits.maxExclusive ? '< ' : '≤ ') + max);
+    return parts.join(' 且 ');
+}
+
 /** 入口按钮的调节滑杆图标，内联 SVG，颜色跟随文字色。 */
 function slidersIcon(): SVGSVGElement {
     const ns = 'http://www.w3.org/2000/svg', svg = document.createElementNS(ns, 'svg');
@@ -181,6 +224,7 @@ export class ConfigDebugPanel {
     private panel: HTMLDivElement | null = null;
     private entry: HTMLButtonElement | null = null;
     private badge: HTMLSpanElement | null = null;
+    private overrideBadge: HTMLSpanElement | null = null;
     private backButton: HTMLButtonElement | null = null;
     private crumbs: HTMLDivElement | null = null;
     private heading: HTMLHeadingElement | null = null;
@@ -232,7 +276,10 @@ export class ConfigDebugPanel {
         this.entry = this.button('测试参数', () => this.setVisible(true), '入口');
         this.entry.prepend(slidersIcon());
         this.entry.setAttribute('aria-label', '打开测试参数'); this.entry.setAttribute('aria-expanded', 'false');
-        this.badge = this.element('span', '徽标'); this.badge.hidden = true; this.entry.appendChild(this.badge);
+        // 入口上先显示本机或会话覆盖的数量，再显示待重启数量：不打开面板也能看出当前不是纯项目配置。
+        this.overrideBadge = this.element('span', '徽标 覆'); this.overrideBadge.hidden = true;
+        this.badge = this.element('span', '徽标'); this.badge.hidden = true;
+        this.entry.append(this.overrideBadge, this.badge);
         shell.appendChild(this.entry);
 
         const panel = this.element('div', '面板'); panel.tabIndex = -1;
@@ -308,7 +355,7 @@ export class ConfigDebugPanel {
         this.resetTimer = null;
         for (const { type, listener } of this.handlers) this.host?.removeEventListener(type, listener);
         this.handlers.length = 0;
-        this.host?.remove(); this.host = null; this.panel = null; this.entry = null; this.badge = null;
+        this.host?.remove(); this.host = null; this.panel = null; this.entry = null; this.badge = null; this.overrideBadge = null;
         this.backButton = null; this.crumbs = null; this.heading = null; this.searchBar = null; this.search = null; this.siblings = null;
         this.directory = null; this.list = null; this.empty = null; this.hint = null; this.exchange = null; this.exchangeButton = null; this.text = null;
         this.summary = null; this.status = null; this.applyButton = null; this.undoButton = null; this.resetButton = null;
@@ -342,22 +389,37 @@ export class ConfigDebugPanel {
             const label = this.element('span', '文字'); label.textContent = field.label;
             const marks = this.element('span', '标记');
             head.append(label, marks);
-            const restore = this.button('↺', () => {}, '复原');
-            restore.setAttribute('aria-label', '恢复默认：' + name); restore.title = '恢复声明默认值（需应用）';
+            const restore = this.button('↺', () => {}, '复原 隐藏'); restore.setAttribute('aria-expanded', 'false');
             const control = this.control(field, name); control.element.classList.add('控件');
             if (field.unit) { const unit = this.element('span', '单位'); unit.textContent = field.unit; control.element.appendChild(unit); }
-            control.element.appendChild(restore);
+            // 固定参数只读显示，不提供恢复入口。
+            if (field.fixed) {
+                control.element.title = '固定值，不可修改';
+                control.element.querySelectorAll('input,select,textarea').forEach(item => { (item as HTMLInputElement).disabled = true; });
+            } else control.element.appendChild(restore);
             if (field.showWhen) this.hasConditions = true;
+            const ladder = this.element('div', '层级'); ladder.hidden = true; ladder.setAttribute('aria-label', '各层的值：' + name);
             const details = this.element('div', '详情'), note = this.element('div', '元');
             const problem = document.createElement('p'); problem.className = '问题'; problem.hidden = true;
             details.appendChild(problem);
             if (field.description) { const text = document.createElement('p'); text.className = '描述'; text.textContent = field.description; details.appendChild(text); }
+            // 键、范围、步长与默认值不随配置变化，只创建一次；“本局仍为”按待重启状态显示。
+            const keyButton = this.button(key, () => this.copyKey(key), '键'); keyButton.title = '点击复制参数键';
+            const limits = field.kind === '数值' || field.kind === '向量' ? field : null, range = limits ? rangeText(limits) : null;
+            note.appendChild(keyButton);
+            if (range !== null) note.appendChild(this.metaItem('范围', range + (field.unit ? ' ' + field.unit : '')));
+            if (limits?.step !== undefined) note.appendChild(this.metaItem('步长', String(limits.step)));
+            else if (limits?.integer) note.appendChild(this.metaItem('取值', '整数'));
+            if (field.kind === '文本' && field.maxLength !== undefined) note.appendChild(this.metaItem('最长', field.maxLength + ' 字'));
+            if (field.kind !== '数据') note.appendChild(this.metaItem('默认', formatValue(field.defaultValue) + (field.unit ? ' ' + field.unit : '')));
+            const running = this.metaItem('本局仍为', '', '运行'); running.hidden = true; note.appendChild(running);
             details.appendChild(note);
-            element.append(head, control.element, details);
+            element.append(head, control.element, ladder, details);
             node.section.lastElementChild!.appendChild(element);
             const row: FieldRow = { key, field, node, search: [key, field.label, node.title].join(' ').toLowerCase(),
-                element, control, marks, note, restore, problem, problems: [], dirty: false, invalid: false };
-            restore.addEventListener('click', () => { control.write(field.defaultValue); this.touch(row); });
+                element, control, marks, note, restore, problem, problems: [], dirty: false, invalid: false,
+                ladder, ladderOpen: false, target: null, running, signature: '' };
+            restore.addEventListener('click', () => this.restoreClicked(row));
             element.addEventListener('input', () => this.touch(row));
             element.addEventListener('change', () => this.touch(row));
             node.rows.push(row);
@@ -621,11 +683,12 @@ export class ConfigDebugPanel {
                 const box = this.element('div');
                 const color = field.components.join() === 'r,g,b,a', swatch = color ? document.createElement('i') : null;
                 if (swatch) { const frame = this.element('span', '色块'); frame.appendChild(swatch); box.appendChild(frame); }
+                const group = this.element('div', '分量组'); box.appendChild(group);
                 const inputs = field.components.map(component => {
                     const item = document.createElement('label'); item.className = '分量项';
                     const tag = this.element('span'); tag.textContent = component;
                     const input = this.numberInput(field); input.setAttribute('aria-label', name + ' ' + component);
-                    item.append(tag, input); box.appendChild(item); return input;
+                    item.append(tag, input); group.appendChild(item); return input;
                 });
                 const paint = () => {
                     if (!swatch) return;
@@ -641,7 +704,8 @@ export class ConfigDebugPanel {
                 const box = this.element('div');
                 const input = this.numberInput(field); input.setAttribute('aria-label', name);
                 let slider: HTMLInputElement | null = null;
-                if (field.min !== undefined && field.max !== undefined && field.max - field.min <= SLIDER_SPAN) {
+                // 固定值与上下限相同的范围没有可拖动的区间，不生成滑块。
+                if (!field.fixed && field.min !== undefined && field.max !== undefined && field.max > field.min && field.max - field.min <= SLIDER_SPAN) {
                     const range = document.createElement('input'); range.type = 'range';
                     range.min = String(field.min); range.max = String(field.max);
                     range.step = String(field.step ?? (field.integer ? 1 : 'any')); range.setAttribute('aria-label', name + ' 滑块');
@@ -697,8 +761,10 @@ export class ConfigDebugPanel {
         const issues = Object.keys(changes).length ? this.session.store.check('会话', changes) : [];
         const byKey = new Map<string, string[]>(), general: string[] = [];
         for (const issue of issues) {
-            if (!issue.keys.length) general.push(issue.message);
-            for (const key of issue.keys) byKey.set(key, (byKey.get(key) || []).concat(issue.message));
+            // 键对应不到任何参数行的问题（如校验函数写错了键）并入整体问题，不让它在输入时消失。
+            const known = issue.keys.filter(key => this.rowIndex.has(key));
+            if (!known.length) general.push(issue.message);
+            for (const key of known) byKey.set(key, (byKey.get(key) || []).concat(issue.message));
         }
         const changed = new Set<FieldRow>();
         for (const row of this.rows) {
@@ -724,10 +790,105 @@ export class ConfigDebugPanel {
         try { return row.field.showWhen(values) === true; } catch { return true; }
     }
 
-    /** 比较控件与目标值，更新未应用和非法状态。 */
+    /**
+     * 比较控件与目标值，更新未应用和非法状态。已选择恢复目标层时，即使取值与目标值相同，
+     * 只要提交后会清除覆盖也算未应用；手动改成别的值后恢复目标失效。
+     */
     private check(row: FieldRow, snapshot: ConfigSnapshot): void {
-        try { row.dirty = !configEqual(row.control.read(), snapshot.desired[row.key]); row.invalid = false; }
-        catch { row.dirty = true; row.invalid = true; }
+        try {
+            const value = row.control.read();
+            if (row.target !== null) {
+                const level = this.levels(row).filter(item => item.level === row.target)[0];
+                if (!level || !configEqual(value, level.value)) row.target = null;
+            }
+            row.dirty = !configEqual(value, snapshot.desired[row.key]) || (row.target !== null && this.plan(row, value).clear.length > 0);
+            row.invalid = false;
+        } catch { row.dirty = true; row.invalid = true; }
+        if (!row.dirty || row.invalid) row.target = null;
+    }
+
+    /** 一个参数在各层的取值，自上而下：会话、本地、项目中写入过该键的层，最后是声明默认值。 */
+    private levels(row: FieldRow): { level: ConfigLevel; value: ConfigValue }[] {
+        const store = this.session.store, list: { level: ConfigLevel; value: ConfigValue }[] = [];
+        for (const layer of ['会话', '本地', '项目'] as ConfigLayer[]) {
+            const values = store.layer(layer);
+            if (own(values, row.key)) list.push({ level: layer, value: values[row.key] });
+        }
+        list.push({ level: '默认', value: row.field.defaultValue });
+        return list;
+    }
+
+    /**
+     * 一项改动提交后的去向。新值等于“默认 + 项目层”的基准时，清除本地与会话层的覆盖；等于本地层的值时，清除会话层的覆盖；
+     * 其余写入会话层。清除而不是写入一个相同的值，参数才会继续跟随下层此后的调整，也不留下多余的覆盖标记。
+     */
+    private plan(row: FieldRow, value: ConfigValue): CommitPlan {
+        const store = this.session.store, key = row.key, project = store.layer('项目'), local = store.layer('本地');
+        const inProject = own(project, key), held = (['会话', '本地'] as ConfigLayer[]).filter(layer => own(store.layer(layer), key));
+        if (configEqual(value, inProject ? project[key] : row.field.defaultValue)) return { write: false, clear: held, follow: inProject ? '项目' : '默认' };
+        if (own(local, key) && configEqual(value, local[key])) return { write: false, clear: held.filter(layer => layer === '会话'), follow: '本地' };
+        return { write: true, clear: [], follow: '会话' };
+    }
+
+    /**
+     * 逐层恢复列表。最上层是当前目标值的来源：有未应用输入时可“撤销输入”。其下各层“回到此层”即清除它上面的覆盖；
+     * 项目层有值时，声明默认值是一项越过项目配置的改动，标为“改用此值”。选择后不会带来变化的层不给操作。
+     */
+    private entries(row: FieldRow, snapshot: ConfigSnapshot): LevelEntry[] {
+        const levels = this.levels(row), desired = snapshot.desired[row.key], project = levels.filter(item => item.level === '项目')[0];
+        return levels.map((item, i): LevelEntry => {
+            let state = '', action = '';
+            if (i === 0) { if (row.dirty) action = '撤销输入'; else state = '当前'; }
+            else if (row.target === item.level) state = '已选';
+            else if (item.level === '默认' && project) { if (!configEqual(item.value, project.value) && !configEqual(item.value, desired)) action = '改用此值'; }
+            else if (!configEqual(item.value, desired) || this.plan(row, item.value).clear.length) action = '回到此层';
+            return { level: item.level, value: item.value, top: i === 0, state, action };
+        });
+    }
+
+    /** 选择列表中的一层：把该层的值填入控件并记为恢复目标，仍需应用；选最上层即撤销本行输入。 */
+    private choose(row: FieldRow, entry: LevelEntry): void {
+        row.control.write(entry.value);
+        row.target = entry.top ? null : entry.level;
+        this.touch(row);
+        if (row.ladderOpen) row.restore.focus({ preventScroll: true });
+    }
+
+    /** 点击恢复图标：只有一个可选操作时直接执行，否则展开或收起逐层列表。 */
+    private restoreClicked(row: FieldRow): void {
+        const snapshot = this.session.store.snapshot(), actions = this.entries(row, snapshot).filter(entry => entry.action);
+        if (!row.ladderOpen && actions.length === 1) { this.choose(row, actions[0]); return; }
+        row.ladderOpen = !row.ladderOpen;
+        this.refreshRow(row, snapshot);
+    }
+
+    /** 带单位的取值文字。 */
+    private valueText(row: FieldRow, value: ConfigValue): string { return formatValue(value) + (row.field.unit ? ' ' + row.field.unit : ''); }
+
+    /** 说明本行未应用的改动提交后的去向，显示在逐层列表下方。 */
+    private planText(row: FieldRow): string {
+        if (!row.dirty) return '';
+        if (row.invalid) return '输入有误，改正后才能应用';
+        let value: ConfigValue;
+        try { value = row.control.read(); } catch { return ''; }
+        const plan = this.plan(row, value);
+        if (plan.write) {
+            const project = this.session.store.layer('项目');
+            const skips = own(project, row.key) && configEqual(value, row.field.defaultValue);
+            return '应用后写入会话层：' + this.valueText(row, value) + (skips ? '（越过项目配置的 ' + this.valueText(row, project[row.key]) + '）' : '');
+        }
+        if (!plan.clear.length) return '';
+        return '应用后清除' + plan.clear.map(layer => LEVEL_NAMES[layer]).join('、') + '的覆盖，改为跟随' + LEVEL_NAMES[plan.follow] + '的 ' + this.valueText(row, value)
+            + (plan.clear.indexOf('本地') !== -1 ? '；浏览器里已保存的内容要再点“保存到本机”才更新' : '');
+    }
+
+    /** 逐层列表中的一行：层名、取值，以及状态文字或操作按钮。 */
+    private levelLine(name: string, value: string, state: string, action: string, run: (() => void) | null, className = ''): HTMLDivElement {
+        const line = this.element('div', '层 ' + (className || state)), label = this.element('span', '层名'), text = this.element('span', '层值');
+        label.textContent = name; text.textContent = value; line.append(label, text);
+        if (action && run) { const button = this.button(action, run); button.setAttribute('aria-label', action + '：' + name + ' ' + value); line.appendChild(button); }
+        else { const tag = this.element('span', '态'); tag.textContent = state; line.appendChild(tag); }
+        return line;
     }
 
     /** 配置变化后只刷新显示：未修改的控件跟随目标值，未应用的输入保留。 */
@@ -742,31 +903,51 @@ export class ConfigDebugPanel {
         if (this.view.kind === 'changed' || this.query() || this.hasConditions) this.filter();
     }
 
-    /** 刷新行标记与元信息：生效时机、非默认来源、未应用、待重启及范围。 */
+    /**
+     * 刷新行标记、恢复入口与逐层列表：生效时机、非默认来源、未应用、待重启。
+     * 先算出状态摘要，与上次相同时直接返回，一次提交不会重建没有变化的行。
+     */
     private refreshRow(row: FieldRow, snapshot: ConfigSnapshot): void {
         const { field, key } = row, source = snapshot.sources[key], pending = snapshot.pendingRestart.indexOf(key) !== -1;
+        // 恢复入口只在测试者自己有改动时出现：未应用的输入，或本机、会话层的覆盖；仅项目配置不同于默认值时不提示恢复。
+        const restorable = !field.fixed && (row.dirty || source === '本地' || source === '会话');
+        if (!restorable) row.ladderOpen = false;
+        const entries = restorable ? this.entries(row, snapshot) : [], hint = row.ladderOpen ? this.planText(row) : '';
+        let draft = '';
+        if (row.ladderOpen && row.dirty) {
+            try { draft = row.invalid ? '输入有误' : this.valueText(row, row.control.read()); } catch { draft = '输入有误'; }
+        }
+        const signature = JSON.stringify([source, pending, row.dirty, row.invalid, row.problems, pending ? snapshot.active[key] : null,
+            restorable, row.ladderOpen, entries, hint, draft]);
+        if (signature === row.signature) return;
+        row.signature = signature;
         const wrong = row.invalid || row.problems.length > 0;
         row.element.classList.toggle('已改', row.dirty && !wrong);
         row.element.classList.toggle('非法', wrong);
         row.problem.textContent = row.problems.join('\n'); row.problem.hidden = !row.problems.length;
         const marks: [string, string][] = [[field.timing || '重启', field.timing === '实时' ? '实时' : '重启']];
+        if (field.fixed) marks.push(['固定', '固定']);
         if (source !== '默认') marks.push([source, '来源']);
         if (pending) marks.push(['待重启', '待重启']);
         if (row.dirty) marks.push(row.invalid ? ['输入有误', '输入有误'] : ['未应用', '未应用']);
         if (!row.invalid && row.problems.length) marks.push(['有误', '有误']);
         row.marks.replaceChildren(...marks.map(([text, className]) => { const tag = this.element('span', className); tag.textContent = text; return tag; }));
-        row.restore.classList.toggle('隐藏', !row.dirty && configEqual(snapshot.desired[key], field.defaultValue));
-        const keyButton = this.button(key, () => this.copyKey(key), '键'); keyButton.title = '点击复制参数键';
-        const items: HTMLElement[] = [keyButton];
-        const limits = field.kind === '数值' || field.kind === '向量' ? field : null;
-        if (limits && (limits.min !== undefined || limits.max !== undefined))
-            items.push(this.metaItem('范围', (limits.min ?? '−∞') + ' – ' + (limits.max ?? '∞') + (field.unit ? ' ' + field.unit : '')));
-        if (limits?.step !== undefined) items.push(this.metaItem('步长', String(limits.step)));
-        else if (limits?.integer) items.push(this.metaItem('取值', '整数'));
-        if (field.kind === '文本' && field.maxLength !== undefined) items.push(this.metaItem('最长', field.maxLength + ' 字'));
-        if (field.kind !== '数据') items.push(this.metaItem('默认', formatValue(field.defaultValue) + (field.unit ? ' ' + field.unit : '')));
-        if (pending) items.push(this.metaItem('本局仍为', formatValue(snapshot.active[key]), '运行'));
-        row.note.replaceChildren(...items);
+        row.running.hidden = !pending;
+        if (pending) row.running.lastElementChild!.textContent = formatValue(snapshot.active[key]);
+        // 只有一个可选操作时图标直接执行它，提示里写明恢复到哪一层的哪个值；否则展开列表供选择。
+        const actions = entries.filter(entry => entry.action), single = !row.ladderOpen && actions.length === 1 ? actions[0] : null;
+        const tip = single ? (single.top ? '撤销本行未应用的输入' : (single.action === '改用此值' ? '改用' : '恢复为') + LEVEL_NAMES[single.level] + '的 '
+            + this.valueText(row, single.value) + '（需应用）') : row.ladderOpen ? '收起各层的值' : '查看各层的值并选择恢复到哪一层';
+        row.restore.classList.toggle('隐藏', !restorable);
+        row.restore.title = tip; row.restore.setAttribute('aria-label', tip + '：' + row.node.title + ' / ' + field.label);
+        row.restore.setAttribute('aria-expanded', String(row.ladderOpen));
+        row.ladder.hidden = !row.ladderOpen;
+        if (!row.ladderOpen) { row.ladder.replaceChildren(); return; }
+        const lines: HTMLElement[] = row.dirty ? [this.levelLine('未应用', draft, '待应用', '', null, '草稿')] : [];
+        for (const entry of entries)
+            lines.push(this.levelLine(LEVEL_NAMES[entry.level], this.valueText(row, entry.value), entry.state, entry.action, entry.action ? () => this.choose(row, entry) : null));
+        if (hint) { const note = this.element('div', '去向'); note.textContent = hint; lines.push(note); }
+        row.ladder.replaceChildren(...lines);
     }
 
     /** 生成一个“标签 + 值”的元信息项。 */
@@ -807,8 +988,11 @@ export class ConfigDebugPanel {
         this.applyButton!.textContent = dirty ? '应用 ' + dirty + ' 项改动' : '应用改动';
         this.applyButton!.classList.toggle('主', dirty > 0);
         this.undoButton!.disabled = dirty === 0;
-        this.badge!.hidden = pending === 0; this.badge!.textContent = String(pending);
+        this.overrideBadge!.hidden = overridden === 0; this.overrideBadge!.textContent = '覆盖 ' + overridden;
+        this.overrideBadge!.title = overridden + ' 项参数被本机保存或本次会话覆盖';
+        this.badge!.hidden = pending === 0; this.badge!.textContent = '重启 ' + pending;
         this.badge!.title = pending + ' 项等待重启';
+        this.entry!.setAttribute('aria-label', '打开测试参数' + (overridden ? '，' + overridden + ' 项覆盖' : '') + (pending ? '，' + pending + ' 项待重启' : ''));
         if (!this.directory!.hidden) this.renderDirectory();
     }
 
@@ -818,20 +1002,34 @@ export class ConfigDebugPanel {
         return row.dirty || source === '本地' || source === '会话';
     }
 
-    /** 只提交未应用的改动，读取失败时定位到出错控件；整批校验保证跨字段关系不出现短暂非法状态。 */
+    /**
+     * 只提交未应用的改动，读取失败时定位到出错控件；整批校验保证跨字段关系不出现短暂非法状态。
+     * 每项改动按 plan 写入会话层或清除覆盖，本地与会话两层一次原子替换；清除本地层只改内存，“保存到本机”后才更新浏览器存档。
+     */
     private apply(): ConfigUpdateResult {
-        const desired = this.session.store.snapshot().desired;
-        const changes: Record<string, ConfigValue> = Object.create(null);
+        const store = this.session.store;
+        const session: Record<string, ConfigValue> = { ...store.layer('会话') }, local: Record<string, ConfigValue> = { ...store.layer('本地') };
+        let touched = false, localTouched = false;
         for (const row of this.rows) {
             if (!row.dirty) continue;
             let value: ConfigValue;
             try { value = row.control.read(); }
             catch (error) { this.reveal(row); throw error; }
-            if (!configEqual(value, desired[row.key])) changes[row.key] = value;
+            const plan = this.plan(row, value);
+            if (plan.write) session[row.key] = value;
+            for (const layer of plan.clear) {
+                if (layer === '会话') delete session[row.key];
+                else { delete local[row.key]; localTouched = true; }
+            }
+            touched = true;
         }
-        if (!Object.keys(changes).length) return { changed: false, deferred: false };
-        try { return this.session.store.patchLayer('会话', changes); }
-        catch (error) {
+        if (!touched) return { changed: false, deferred: false };
+        try {
+            const result = store.replaceLayers(localTouched ? { 本地: local, 会话: session } : { 会话: session });
+            // 各层没有实际变化时容器不通知，仍需把行状态与目标值对齐。
+            if (!result.changed) this.sync(store.snapshot());
+            return result;
+        } catch (error) {
             // 定位到第一个带参数键的问题所在行，问题文本已由输入时的试算显示在该行。
             const key = error instanceof ConfigError ? error.details.map(item => item.keys[0]).filter(item => !!item)[0] : undefined;
             const row = key ? this.rowIndex.get(key) : undefined;
@@ -846,7 +1044,7 @@ export class ConfigDebugPanel {
         let count = 0;
         for (const row of this.rows) {
             if (!row.dirty) continue;
-            row.control.write(snapshot.desired[row.key]); row.dirty = false; row.invalid = false; count++;
+            row.control.write(snapshot.desired[row.key]); row.dirty = false; row.invalid = false; row.target = null; count++;
             this.refreshRow(row, snapshot);
         }
         this.refreshProblems().forEach(row => this.refreshRow(row, snapshot));
@@ -865,7 +1063,7 @@ export class ConfigDebugPanel {
         }
         this.clearResetConfirm();
         this.run(() => {
-            for (const row of this.rows) { row.dirty = false; row.invalid = false; }
+            for (const row of this.rows) { row.dirty = false; row.invalid = false; row.target = null; }
             const issues = this.session.reset();
             // 覆盖本已为空时容器不会通知，仍需把清除的草稿换回目标值。
             this.sync(this.session.store.snapshot());

@@ -1,6 +1,6 @@
 import type { ConfigPlugin } from '../ConfigSetup';
 import type { ConfigStore } from '../ConfigStore';
-import { ConfigError } from '../ConfigTypes';
+import { ConfigError, ConfigNotice } from '../ConfigTypes';
 import { ConfigDebugPanel, ConfigPanelOptions } from './ConfigDebugPanel';
 import { ConfigStorage, ConfigTestSession } from './ConfigTestSession';
 
@@ -28,10 +28,10 @@ export class ConfigTestTools implements ConfigPlugin {
     get panel(): ConfigDebugPanel | null { return this.panelValue; }
 
     /** 创建测试会话并在重启参数锁定前恢复本地与链接层，返回逐项提示。 */
-    beforeStart(store: ConfigStore): readonly string[] {
+    beforeStart(store: ConfigStore): readonly ConfigNotice[] {
         if (this.sessionValue) throw new ConfigError(['同一测试工具只能接入一个配置运行实例']);
         this.sessionValue = new ConfigTestSession(store, { storage: this.options.storage, url: this.options.url });
-        return this.sessionValue.restore();
+        return this.sessionValue.restoreNotices();
     }
 
     /** 按选项创建面板；挂载由项目在界面就绪后调用 mount。 */

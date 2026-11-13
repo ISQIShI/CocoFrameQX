@@ -161,6 +161,7 @@ export class ConfigBinderScope {
 
     /** 只取数值约束字段。 */
     private limits(options: ConfigBindOptions): NumberLimits {
-        return { min: options.min, max: options.max, integer: options.integer, step: options.step };
+        return { min: options.min, max: options.max, minExclusive: options.minExclusive, maxExclusive: options.maxExclusive,
+            integer: options.integer, step: options.step };
     }
 }
